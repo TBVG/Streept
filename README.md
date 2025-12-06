@@ -1,4 +1,4 @@
-# Advanced Navigation App
+# Experimental Navigation App
 
 A web application featuring 2D navigation with automatic first-person 3D views at key contextual points (turns, exits, complex junctions), powered by CesiumJS.
 
