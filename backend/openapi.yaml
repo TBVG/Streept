@@ -1,0 +1,314 @@
+openapi: 3.0.0
+info:
+  title: Navigation App API
+  version: 1.0.0
+  description: API for advanced navigation app with 3D views and parking management
+
+servers:
+  - url: http://localhost:3001/api
+    description: Local development server
+
+paths:
+  /parking:
+    get:
+      summary: Get available parking near destination
+      parameters:
+        - name: destination
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "37.7749,-122.4194"
+      responses:
+        '200':
+          description: List of available parking spaces
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParkingResponse'
+  
+  /parking/reserve:
+    post:
+      summary: Reserve a parking spot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParkingReservationRequest'
+      responses:
+        '200':
+          description: Reservation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParkingReservationResponse'
+
+  /reports:
+    get:
+      summary: Get nearby reports
+      parameters:
+        - name: lat
+          in: query
+          required: true
+          schema:
+            type: number
+        - name: lng
+          in: query
+          required: true
+          schema:
+            type: number
+        - name: radius
+          in: query
+          schema:
+            type: number
+            default: 1000
+      responses:
+        '200':
+          description: List of nearby reports
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportsResponse'
+
+  /billboards:
+    get:
+      summary: Get nearby billboards
+      parameters:
+        - name: lat
+          in: query
+          required: true
+          schema:
+            type: number
+        - name: lng
+          in: query
+          required: true
+          schema:
+            type: number
+        - name: radius
+          in: query
+          schema:
+            type: number
+            default: 1000
+      responses:
+        '200':
+          description: List of nearby billboards
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillboardsResponse'
+
+  /route:
+    get:
+      summary: Get route with 3D highlight data
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "37.7749,-122.4194"
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "37.7849,-122.4094"
+      responses:
+        '200':
+          description: Route with 3D highlight segments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteResponse'
+
+components:
+  schemas:
+    ParkingSpace:
+      type: object
+      properties:
+        id:
+          type: string
+        location:
+          type: object
+          properties:
+            lat:
+              type: number
+            lng:
+              type: number
+        is_available:
+          type: boolean
+        occupied_by:
+          type: string
+          nullable: true
+        occupied_at:
+          type: string
+          format: date-time
+          nullable: true
+        photo_url:
+          type: string
+          nullable: true
+        pending:
+          type: boolean
+
+    ParkingResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParkingSpace'
+
+    ParkingReservationRequest:
+      type: object
+      required:
+        - parking_id
+        - user_id
+      properties:
+        parking_id:
+          type: string
+        user_id:
+          type: string
+        photo_url:
+          type: string
+          nullable: true
+
+    ParkingReservationResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/ParkingSpace'
+          nullable: true
+        error:
+          type: object
+          nullable: true
+          properties:
+            error:
+              type: string
+            message:
+              type: string
+
+    ReportsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Report'
+
+    BillboardsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Billboard'
+
+    RouteResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Route3DHighlight'
+
+    Report:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [cop, hazard, construction, accident, traffic_jam, closed_lane]
+        location:
+          type: object
+          properties:
+            lat:
+              type: number
+            lng:
+              type: number
+        photo_url:
+          type: string
+          nullable: true
+        reported_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        reporter_id:
+          type: string
+
+    Billboard:
+      type: object
+      properties:
+        id:
+          type: string
+        location:
+          type: object
+          properties:
+            lat:
+              type: number
+            lng:
+              type: number
+        is_purchased:
+          type: boolean
+        purchased_by:
+          type: string
+          nullable: true
+        ad_image_url:
+          type: string
+          nullable: true
+        ad_target_url:
+          type: string
+          nullable: true
+        display_start:
+          type: string
+          format: date-time
+          nullable: true
+        display_end:
+          type: string
+          format: date-time
+          nullable: true
+
+    Route3DHighlight:
+      type: object
+      properties:
+        segments:
+          type: array
+          items:
+            $ref: '#/components/schemas/RouteSegment'
+
+    RouteSegment:
+      type: object
+      properties:
+        coords:
+          type: array
+          items:
+            $ref: '#/components/schemas/RouteCoord'
+        is_highlighted:
+          type: boolean
+        color:
+          type: string
+        lane_index:
+          type: integer
+          nullable: true
+
+    RouteCoord:
+      type: object
+      properties:
+        lat:
+          type: number
+        lng:
+          type: number
+        alt:
+          type: number
+
