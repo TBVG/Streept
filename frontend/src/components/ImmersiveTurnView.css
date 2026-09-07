@@ -1,0 +1,172 @@
+.immersive-turn-view {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #b8d5e5;
+}
+
+.immersive-cesium { position: absolute; inset: 0; }
+
+.immersive-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(5, 8, 11, .18), transparent 22%, transparent 70%, rgba(5, 8, 10, .42)),
+    radial-gradient(ellipse at 50% 55%, transparent 45%, rgba(4, 7, 9, .22) 100%);
+}
+
+.immersive-road-horizon {
+  position: absolute;
+  left: 0; right: 0; bottom: 0; height: 24%;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent, rgba(8, 11, 14, .2));
+}
+
+.immersive-top-card,
+.immersive-bottom-card {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  z-index: 20;
+  color: #fff;
+  background: rgba(10, 13, 16, .91);
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 18px;
+  box-shadow: 0 14px 36px rgba(0,0,0,.28);
+  backdrop-filter: blur(14px);
+}
+
+.immersive-top-card { top: 16px; overflow: hidden; }
+.immersive-bottom-card { bottom: 16px; display: flex; align-items: center; gap: 42px; padding: 16px 20px; }
+
+.immersive-lane-strip {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  align-items: center;
+  min-height: 68px;
+  padding: 4px 24px 0;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+
+.immersive-lane-arrow {
+  display: grid;
+  place-items: center;
+  color: rgba(255,255,255,.45);
+  font-size: 42px;
+  font-weight: 700;
+  line-height: 1;
+  transition: color .2s ease, transform .2s ease;
+}
+
+.immersive-lane-arrow.is-active {
+  color: #2d7ff9;
+  transform: translateY(-2px) scale(1.08);
+  text-shadow: 0 0 18px rgba(45,127,249,.35);
+}
+
+.immersive-maneuver-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 22px 17px;
+}
+
+.immersive-distance {
+  color: #fff;
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: -.03em;
+}
+
+.immersive-instruction {
+  margin-top: 6px;
+  font-size: 24px;
+  line-height: 1.08;
+  font-weight: 700;
+}
+
+.immersive-subtitle {
+  margin-top: 5px;
+  color: rgba(255,255,255,.62);
+  font-size: 12px;
+}
+
+.immersive-exit-badge {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #1767d2;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  box-shadow: 0 6px 16px rgba(0,0,0,.2);
+}
+
+.immersive-side-controls {
+  position: absolute;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 22;
+}
+
+.immersive-side-controls button,
+.immersive-collapse-button {
+  width: 46px;
+  height: 46px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(9,13,16,.9);
+  color: #fff;
+  font-size: 20px;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 8px 20px rgba(0,0,0,.28);
+}
+
+.immersive-route-label {
+  position: absolute;
+  left: 50%;
+  bottom: 116px;
+  transform: translateX(-50%);
+  z-index: 21;
+  padding: 7px 14px;
+  border-radius: 9px;
+  background: rgba(12,15,18,.92);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  box-shadow: 0 6px 16px rgba(0,0,0,.22);
+}
+
+.immersive-trip-stat { min-width: 70px; }
+.immersive-trip-stat strong { display: block; font-size: 24px; line-height: 1; letter-spacing: -.02em; }
+.immersive-trip-stat span { display: block; margin-top: 5px; color: rgba(255,255,255,.6); font-size: 12px; }
+
+.immersive-collapse-button { margin-left: auto; width: 40px; height: 40px; font-size: 22px; }
+
+.immersive-free-badge {
+  position: absolute;
+  right: 14px;
+  bottom: 4px;
+  z-index: 25;
+  color: rgba(255,255,255,.65);
+  font-size: 10px;
+  text-shadow: 0 1px 4px rgba(0,0,0,.8);
+}
+
+@media (max-width: 900px) {
+  .immersive-top-card { left: 10px; right: 10px; }
+  .immersive-bottom-card { left: 10px; right: 10px; gap: 18px; padding: 13px 15px; }
+  .immersive-lane-arrow { font-size: 32px; }
+  .immersive-distance { font-size: 25px; }
+  .immersive-instruction { font-size: 19px; }
+  .immersive-side-controls { right: 10px; }
+  .immersive-route-label { bottom: 103px; }
+}

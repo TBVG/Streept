@@ -1,0 +1,381 @@
+                <span className="start-navigation-button-icon">➤</span>
+                <span>{routeLoading ? 'Building route…' : 'Enter navigation'}</span>
+              </button>
+            </div>
+          </div>
+        )}
+        {navigationStarted && routeLoading && (
+          <div className="navigation-recalculating" role="status">
+            <span className="navigation-recalculating-dot" />
+            Recalculating your route…
+          </div>
+        )}
+        {navigationPhase === 'arrived' && destination && (
+          <div className="arrival-card" role="status">
+            <div className="arrival-card-check">✓</div>
+            <div>
+              <span className="arrival-card-eyebrow">ARRIVED</span>
+              <strong>{searchQuery || 'Destination'}</strong>
+            </div>
+            <button type="button" onClick={() => { clearNavigationSession(); setDestination(null); setRouteOptions([]); dispatchNavigation({ type: 'RESET' }); setSearchQuery(''); }}>Done</button>
+          </div>
+        )}
+        <MapContainer
+          ref={mapRef}
+          center={userLocation ? [userLocation.lat, userLocation.lng] : [37.7749, -122.4194]}
+          zoom={13}
+          style={{ height: '100%', width: '100%' }}
+        >
+          <TileLayer url={getLeafletTileUrl(theme)} attribution={getLeafletAttribution()} />
+          {userLocation && (
+            <Marker
+              position={[userLocation.lat, userLocation.lng]}
+              icon={
+                headingDeg !== null
+                  ? L.divIcon({
+                      html: `<div class="vehicle-arrow-wrap" style="transform: rotate(${headingDeg}deg)"><svg width="32" height="32" viewBox="0 0 32 32" class="vehicle-arrow-svg"><path class="vehicle-arrow-path" d="M16 2 L28 28 L16 22 L4 28 Z"/></svg></div>`,
+                      className: 'vehicle-marker-icon',
+                      iconSize: [32, 32],
+                      iconAnchor: [16, 16],
+                    })
+                  : L.divIcon({
+                      html: `<div class="vehicle-dot"></div>`,
+                      className: 'vehicle-marker-icon',
+                      iconSize: [18, 18],
+                      iconAnchor: [9, 9],
+                    })
+              }
+            >
+              <Popup>Your Location</Popup>
+            </Marker>
+          )}
+          {destination && (
+            <Marker position={[destination.lat, destination.lng]}>
+              <Popup>Destination</Popup>
+            </Marker>
+          )}
+          {route &&
+            route.segments.map((segment, idx) => {
+              const positions = segment.coords.map((c) => [c.lat, c.lng] as [number, number]);
+              // Dark casing underneath + bright amber fill on top — the
+              // standard nav-app route treatment, needed for legibility
+              // against any basemap (especially satellite imagery, whose
+              // colors are unpredictable). Casing color is fixed regardless
+              // of app theme since it's about contrast with the *map*, not
+              // matching the UI chrome. Literal hex values here, not CSS
+              // var() — Leaflet sets these as raw SVG attributes, which
+              // don't resolve CSS custom properties the way stylesheet
+              // rules do.
+              return (
+                <React.Fragment key={idx}>
+                  <Polyline positions={positions} color="#0b0c0e" weight={10} opacity={0.9} />
+                  <Polyline positions={positions} color={ROUTE_LINE_COLOR[theme]} weight={6} />
+                </React.Fragment>
+              );
+            })}
+          {reports.map((report) => {
+            const meta = REPORT_TYPE_META[report.type] ?? { label: report.type, emoji: '📍' };
+            return (
+              <Marker
+                key={report.id}
+                position={[report.location.lat, report.location.lng]}
+                icon={L.divIcon({
+                  html: `<div class="report-marker">${meta.emoji}</div>`,
+                  className: '',
+                  iconSize: [28, 28],
+                })}
+              >
+                <Popup>
+                  <div>
+                    <p>
+                      <strong>{meta.label}</strong>
+                    </p>
+                    <p>
+                      👍 {report.confirmations} still there &nbsp; 👎 {report.dismissals} gone
+                    </p>
+                    <button onClick={() => handleConfirmReport(report)}>Still there</button>{' '}
+                    <button onClick={() => handleDismissReport(report)}>Not there</button>
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          })}
+          {billboards.map((billboard) => {
+            const loc = billboard.location as Location;
+            const isMine = billboard.purchased_by === currentUserId;
+            const isFormOpen = billboardFormId === billboard.id;
+            return (
+              <Marker
+                key={billboard.id}
+                position={[loc.lat, loc.lng]}
+                icon={L.divIcon({
+                  html: `<div class="billboard-marker">📢</div>`,
+                  className: '',
+                  iconSize: [28, 28],
+                })}
+              >
+                <Popup minWidth={220}>
+                  <div>
+                    {billboard.is_purchased && billboard.ad_image_url ? (
+                      <div>
+                        <img
+                          src={billboard.ad_image_url}
+                          alt="Advertisement"
+                          style={{ width: '100%', maxHeight: 100, objectFit: 'cover', cursor: 'pointer' }}
+                          onClick={() => handleBillboardAdClick(billboard)}
+                        />
+                        <p style={{ fontSize: 12, color: '#666' }}>
+                          {billboard.click_count} click{billboard.click_count === 1 ? '' : 's'}
+                          {billboard.display_end &&
+                            ` · displaying until ${new Date(billboard.display_end).toLocaleString()}`}
+                        </p>
+                        {isMine && <p style={{ fontSize: 12 }}>This is your billboard</p>}
+                      </div>
+                    ) : isFormOpen ? (
+                      <div className="billboard-form">
+                        <input
+                          type="text"
+                          placeholder="Ad image URL"
+                          value={billboardFormAdImage}
+                          onChange={(e) => setBillboardFormAdImage(e.target.value)}
+                        />
+                        <input
+                          type="text"
+                          placeholder="Ad target URL (where clicks go)"
+                          value={billboardFormAdTarget}
+                          onChange={(e) => setBillboardFormAdTarget(e.target.value)}
+                        />
+                        <select
+                          value={billboardFormDurationHours}
+                          onChange={(e) => setBillboardFormDurationHours(Number(e.target.value))}
+                        >
+                          <option value={24}>24 hours</option>
+                          <option value={24 * 7}>7 days</option>
+                          <option value={24 * 30}>30 days (max)</option>
+                        </select>
+                        {billboardError && <p className="billboard-form-error">{billboardError}</p>}
+                        <button onClick={handlePurchaseBillboard} disabled={billboardSubmitting}>
+                          {billboardSubmitting ? 'Booking...' : 'Book this billboard'}
+                        </button>
+                        <button onClick={() => setBillboardFormId(null)}>Cancel</button>
+                      </div>
+                    ) : (
+                      <div>
+                        <p>Available billboard</p>
+                        <button onClick={() => openBillboardForm(billboard)}>Book this spot</button>
+                      </div>
+                    )}
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          })}
+          {parkingOnly && parkedCars.map((car) => (
+            <Marker
+              key={`parked-car-${car.id}`}
+              position={[car.location.lat, car.location.lng]}
+              icon={L.divIcon({
+                html: '<div class="parked-car-marker"><span>🚗</span></div>',
+                className: '',
+                iconSize: [30, 30],
+                iconAnchor: [15, 15],
+              })}
+            >
+              <Popup>
+                <div className="parking-car-popup">
+                  <strong>Parked here</strong>
+                  <span>Anonymous Streept driver</span>
+                  <small>Live occupancy signal</small>
+                </div>
+              </Popup>
+            </Marker>
+          ))}
+          {parkingOnly && parkingLots.map((lot) => {
+            const loc = lot.location as Location;
+            const ratio = lot.total_spaces > 0 ? lot.occupied_spaces / lot.total_spaces : 0;
+            const status = ratio >= 1 ? 'full' : ratio >= .82 ? 'busy' : ratio >= .55 ? 'moderate' : 'open';
+            const isMine = parkedLotId === lot.id;
+            const lotCars = parkedCars.filter((car) => car.lot_id === lot.id);
+            return (
+              <Marker
+                key={lot.id}
+                position={[loc.lat, loc.lng]}
+                icon={L.divIcon({
+                  html: `<div class="parking-lot-marker parking-lot-marker--${status}${isMine ? ' parking-lot-marker--mine' : ''}"><span class="parking-lot-marker-icon">P</span><span>${lot.occupied_spaces}/${lot.total_spaces}</span></div>`,
+                  className: '',
+                  iconSize: [82, 34],
+                  iconAnchor: [41, 17],
+                })}
+                eventHandlers={{ click: () => setShowParkingPanel(true) }}
+              >
+                <Popup>
+                  <div className="parking-popup">
+                    <div className="parking-popup-head">
+                      <div><strong>{lot.name ?? 'Parking'}</strong><span>{status === 'full' ? 'Full' : status === 'busy' ? 'Busy' : 'Spaces available'}</span></div>
+                      <b>{Math.max(0, lot.total_spaces - lot.occupied_spaces)}</b>
+                    </div>
+                    <div className="parking-popup-meter"><span style={{ width: `${Math.min(100, ratio * 100)}%` }} /></div>
+                    <p>{lot.occupied_spaces} of {lot.total_spaces} spaces occupied</p>
+                    <p className="parking-popup-live">● {lotCars.length} Streept car{lotCars.length === 1 ? '' : 's'} detected</p>
+                    {isMine && <p className="parking-popup-mine">Your car is sharing this location</p>}
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          })}
+        </MapContainer>
+        {userLocation && (
+          <div className="map-location-control">
+            <button
+              type="button"
+              className="locate-me-button"
+              onClick={() => {
+                if (!mapRef.current || !userLocation) return;
+                hasCenteredOnLocationRef.current = true;
+                mapRef.current.flyTo([userLocation.lat, userLocation.lng], Math.max(mapRef.current.getZoom(), 16), { duration: 0.8 });
+              }}
+              title="Center map on my location"
+              aria-label="Center map on my location"
+            >
+              ◎
+            </button>
+          </div>
+        )}
+        <div className="map-utility-stack">
+          <button className={`map-utility-button ${showParkingPanel ? 'is-active' : ''}`} onClick={() => setShowParkingPanel(v => !v)} aria-label="Parking">
+            <span>⌾</span><small>Parking</small>
+          </button>
+          <button className={`map-utility-button ${showLayersPanel ? 'is-active' : ''}`} onClick={() => setShowLayersPanel(v => !v)} aria-label="Map layers">
+            <span>≋</span><small>Layers</small>
+          </button>
+        </div>
+        {showLayersPanel && (
+          <div className="map-layer-panel">
+            <div><strong>Map layers</strong><button onClick={() => setShowLayersPanel(false)}>×</button></div>
+            <label><span><i className="layer-swatch layer-swatch--parking" />Parking</span><input type="checkbox" checked={parkingOnly} onChange={(e) => setParkingOnly(e.target.checked)} /></label>
+            <label><span><i className="layer-swatch layer-swatch--reports" />Road reports</span><input type="checkbox" checked={true} readOnly /></label>
+            <label><span><i className="layer-swatch layer-swatch--traffic" />Live traffic</span><input type="checkbox" checked={true} readOnly /></label>
+          </div>
+        )}
+        {showParkingPanel && (
+          <div className="parking-discovery-panel">
+            <div className="parking-discovery-head">
+              <div><span className="eyebrow">LIVE PARKING</span><strong>Find a spot before you arrive</strong></div>
+              <button onClick={() => setShowParkingPanel(false)}>×</button>
+            </div>
+            <div className="parking-discovery-stats"><span><b>{parkingLots.length}</b> lots</span><span><b>{parkedCars.length}</b> cars seen</span></div>
+            <div className="parking-discovery-list">
+              {parkingLots.slice().sort((a,b) => (a.occupied_spaces / Math.max(1,a.total_spaces)) - (b.occupied_spaces / Math.max(1,b.total_spaces))).slice(0,4).map((lot) => {
+                const free = Math.max(0, lot.total_spaces - lot.occupied_spaces);
+                return <button key={lot.id} onClick={() => { mapRef.current?.flyTo([lot.location.lat, lot.location.lng], 17, { duration: .7 }); setShowParkingPanel(false); }}><span className="parking-mini-icon">P</span><span className="parking-mini-copy"><strong>{lot.name ?? 'Parking lot'}</strong><small>{free > 0 ? `${free} spaces likely available` : 'Looks full'} · {lot.occupied_spaces}/{lot.total_spaces}</small></span><span className="parking-mini-arrow">›</span></button>;
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="report-button-container">
+          {showReportMenu ? (
+            <div className="report-menu">
+              {Object.entries(REPORT_TYPE_META).map(([type, meta]) => (
+                <button
+                  key={type}
+                  onClick={() => handleCreateReport(type)}
+                  disabled={reportSubmitting || !userLocation}
+                >
+                  {meta.emoji} {meta.label}
+                </button>
+              ))}
+              <button className="report-menu-cancel" onClick={() => setShowReportMenu(false)}>
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              className="report-fab"
+              onClick={() => setShowReportMenu(true)}
+              disabled={!userLocation}
+              title="Report something at your location"
+            >
+              ⚠️ Report
+            </button>
+          )}
+        </div>
+        {reportError && (
+          <div className="floating-error">
+            <p>{reportError}</p>
+            <button onClick={() => setReportError(null)}>Dismiss</button>
+          </div>
+        )}
+        {parkedLotId && (
+          <div className="parking-status">
+            <p>Parked</p>
+            <p>{parkingLots.find((l) => l.id === parkedLotId)?.name ?? 'Detected automatically'}</p>
+            <button
+              onClick={() => {
+                checkoutParking()
+                  .then(() => setParkedLotId(null))
+                  .catch((error) => console.error('Error checking out of parking:', error));
+              }}
+            >
+              I've left
+            </button>
+          </div>
+        )}
+        <div className="navigation-instructions">
+          <h3>Turn-by-Turn</h3>
+          {activeManeuver && activeManeuverRemainingM !== null ? (
+            <div>
+              <p>
+                <strong>{activeManeuver.instruction}</strong>
+              </p>
+              <p>In {activeManeuverRemainingM} m</p>
+              {activeManeuver.lanes && activeManeuver.lanes.length > 0 && (
+                <div className="lane-guidance">
+                  {activeManeuver.lanes.map((lane, idx) => (
+                    <div key={idx} className={`lane-guidance-lane ${lane.valid ? 'lane-guidance-lane--valid' : ''} ${lane.recommended ? 'lane-guidance-lane--recommended' : ''}`}>
+                      {LANE_INDICATION_ARROW[lane.indications[0]] ?? '•'}
+                    </div>
+                  ))}
+                  <span className="lane-guidance-label">{laneGuidanceLabel(activeManeuver, currentLaneEstimate?.laneIndex ?? routeLaneEstimate?.laneIndex ?? null) ?? 'Lane guidance'}{currentLaneEstimate?.laneIndex != null ? ` · Current lane ${currentLaneEstimate.laneIndex + 1}` : ''}{laneExecution && laneExecution.phase !== 'idle' ? ` · ${laneExecution.phase === 'completed' ? 'Lane change complete' : laneExecution.phase === 'missed' ? 'Re-routing for missed lane' : laneExecution.phase === 'changing' ? 'Changing lane' : 'Prepare lane change'}` : ''}</span>
+                </div>
+              )}
+            </div>
+          ) : route ? (
+            <p>Follow the highlighted route</p>
+          ) : (
+            <p>Click the map to set a destination</p>
+          )}
+          {(destination || activeManeuver) && (
+            <button className="ar-trigger-button" onClick={() => setShowArOverlay(true)}>
+              📷 View in AR
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Right Pane: predictive immersive 3D view. It stays mounted so the
+          Cesium renderer keeps its GPU resources warm between turn previews. */}
+      <div className="map3d-pane" style={{ display: splitView ? 'block' : 'none' }}>
+        <ImmersiveTurnView
+          route={route}
+          userLocation={userLocation}
+          maneuver={activeManeuver}
+          remainingMeters={activeManeuverRemainingM}
+          onSceneContext={(scene) => { setSceneContext(scene); navigationEngineRef.current?.setSceneContext(scene); }}
+          destinationLabel={searchQuery || 'Destination'}
+          currentLaneIndex={currentLaneEstimate?.laneIndex ?? null}
+          currentLaneConfidence={currentLaneEstimate?.confidence ?? 0}
+          laneExecution={laneExecution}
+          liveTrafficVehicles={liveTrafficVehicles}
+          sceneContext={sceneContext}
+        />
+      </div>
+
+      {showArOverlay && userLocation && (destination || activeManeuver) && (
+        <ArOverlay
+          userLocation={userLocation}
+          targetLocation={activeManeuver?.location ?? destination!}
+          targetLabel={activeManeuver?.instruction ?? 'Destination'}
+          onClose={() => setShowArOverlay(false)}
+        />
+      )}

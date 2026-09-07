@@ -1,0 +1,9 @@
+{
+  "name": "Streept Navigation",
+  "short_name": "Streept",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d1114",
+  "theme_color": "#0d1114",
+  "description": "Predictive navigation with immersive turn guidance."
+}

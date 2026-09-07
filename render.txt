@@ -1,0 +1,421 @@
+    route?.distance_meters ?? null,
+    route?.duration_seconds ?? null,
+    speedMps,
+  );
+  const navigationEtaLabel = navigationEta.arrivalTimeMs != null
+    ? new Date(navigationEta.arrivalTimeMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    : '—';
+
+  const routeLaneEstimate = useMemo(() => {
+    if (!upcomingManeuver || !userLocation || routePolyline.length < 2) return null;
+    const projection = projectOntoPolyline(userLocation, routePolyline);
+    if (!projection) return null;
+    const laneCount = Math.max(1, upcomingManeuver.lanes?.length ?? 1);
+    return estimateDriverLane(signedLateralOffset(userLocation, routePolyline, projection.segmentIndex), laneCount);
+  }, [upcomingManeuver, userLocation, routePolyline]);
+
+  const routeRisk = useMemo(() => routeRiskSummary(route, [...reports, ...liveTraffic]), [route, reports, liveTraffic, hazardRefreshAt]);
+  const handleMapClick = (e: L.LeafletMouseEvent) => {
+    const newDest: Location = {
+      lat: e.latlng.lat,
+      lng: e.latlng.lng,
+    };
+    setDestination(newDest);
+    setShowSearchResults(false);
+  };
+
+  const navigationConnectivityLabel = !isOnline
+    ? 'OFFLINE MODE'
+    : gpsStatus === 'lost'
+      ? 'GPS SIGNAL LOST'
+      : gpsStatus === 'weak'
+        ? 'WEAK GPS'
+        : navigationStarted
+          ? 'LIVE NAVIGATION'
+          : 'READY';
+
+  return (
+    <div className={`navigation-view ${splitView ? 'split-view' : ''}`}>
+      {/* Left Pane: 2D Map */}
+      <div className="map-pane">
+        {!isOnline && (
+          <div className="offline-banner">
+            Offline — turn-by-turn keeps working, but search, rerouting, and live updates won't until you're
+            back.
+          </div>
+        )}
+        <div className="brand-mark" aria-label="Streept">
+          <span>STREEPT</span><small>DRIVE BETTER</small>
+        </div>
+        <div className={`gps-status gps-status--${gpsStatus}`} role="status" aria-live="polite">
+          <span className="gps-status-dot" />
+          {navigationConnectivityLabel}
+        {navigationStarted && <span className={`navigation-health navigation-health-${navigationHealth.gps}`} aria-label={`GPS ${navigationHealth.gps}`}>{navigationHealth.gps === 'good' ? 'GPS ready' : navigationHealth.gps === 'weak' ? 'GPS weak' : 'GPS reacquiring'}</span>}
+        </div>
+        {navigationStarted && navigationPhase !== 'arrived' && (
+          <div className="nav-cockpit" aria-live="polite">
+            <div className="nav-cockpit-top">
+              <div className="nav-cockpit-maneuver">
+                <div className="nav-cockpit-distance">{upcomingRemainingM != null ? `${upcomingRemainingM} m` : '—'}</div>
+                <div>
+                  <div className="nav-cockpit-kicker">{navigationPhase === 'rerouting' ? 'RECALCULATING' : 'UP NEXT'}</div>
+                  <div className="nav-cockpit-instruction">{upcomingManeuver?.instruction ?? 'Continue'}</div>
+                  {routeRisk.count > 0 && <div className="nav-cockpit-risk">{routeRisk.count} road alert{routeRisk.count === 1 ? '' : 's'} ahead</div>}
+                </div>
+              </div>
+              <div className="nav-cockpit-lanes">
+                {upcomingManeuver?.lanes?.length ? upcomingManeuver.lanes.slice(0,5).map((lane, idx) => (
+                  <span key={idx} className={`nav-cockpit-lane ${lane.valid ? 'is-valid' : ''}`}>
+                    {(lane.indications?.[0] && LANE_INDICATION_ARROW[lane.indications[0]]) || '↑'}
+                  </span>
+                )) : <span className="nav-cockpit-lane is-valid">{upcomingManeuver?.modifier?.includes('left') ? '↖' : upcomingManeuver?.modifier?.includes('right') ? '↗' : '↑'}</span>}
+              </div>
+            </div>
+            <div className="nav-cockpit-progress"><span style={{ width: `${progressRatio * 100}%` }} /></div>
+            <div className="nav-cockpit-bottom">
+              <div><strong>{speedMps > 0.5 ? Math.round(speedMps * 3.6) : 0}</strong><span>km/h</span></div>
+              <div><strong>{navigationEta.remainingSeconds != null ? Math.max(1, Math.round(navigationEta.remainingSeconds / 60)) : '—'}</strong><span>min left</span></div>
+              <div><strong>{navigationEtaLabel}</strong><span>arrival</span></div>
+              <div className="nav-cockpit-actions">
+                <button type="button" onClick={() => {
+                  if (!userLocation) return;
+                  followMapRef.current = true;
+                  mapRef.current?.flyTo([userLocation.lat, userLocation.lng], 17, { duration: .7 });
+                }} disabled={!userLocation} aria-label="Center on my location">◎</button>
+                <button type="button" onClick={() => setSplitView((v) => !v)}>{splitView ? '2D' : '3D'}</button>
+                <button type="button" onClick={() => { const next = !voiceEnabled; setVoiceEnabled(next); try { localStorage.setItem('streept_voice_enabled', next ? '1' : '0'); } catch {} }} aria-label={voiceEnabled ? 'Mute voice guidance' : 'Enable voice guidance'}>{voiceEnabled ? '🔊' : '🔇'}</button>
+                <button type="button" onClick={handleStopNavigation} className="nav-cockpit-stop">×</button>
+              </div>
+            </div>
+          </div>
+        )}
+        <button type="button" className="theme-toggle nav-theme-toggle" onClick={onToggleTheme} title="Toggle light/dark">
+          {theme === 'dark' ? '☀️' : '🌙'}
+        </button>
+        <div className="trip-search">
+          <div className="trip-search-fields">
+            <div className="trip-search-field-group">
+              <span className="trip-search-icon trip-search-icon-start" aria-hidden="true" />
+              <input
+                type="text"
+                className="trip-search-input"
+                placeholder="Your location"
+                value={startQuery}
+                onChange={(e) => {
+                  setStartQuery(e.target.value);
+                  setShowStartResults(true);
+                }}
+                onFocus={() => setShowStartResults(true)}
+              />
+              {customStart && (
+                <button
+                  type="button"
+                  className="trip-search-clear"
+                  onClick={handleUseCurrentLocationAsStart}
+                  title="Use current location"
+                >
+                  ✕
+                </button>
+              )}
+              {showStartResults && startQuery.trim().length === 0 && recentDestinations.length > 0 && (
+                <div className="trip-search-results">
+                  <div className="trip-search-section-label">Recent</div>
+                  {recentDestinations.map((result, idx) => (
+                    <button key={idx} className="trip-search-result" onClick={() => handleSelectStartResult(result)}>
+                      🕑 {result.display_name}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {showStartResults && startQuery.trim().length >= 3 && (
+                <div className="trip-search-results">
+                  {startLoading && <div className="trip-search-status">Searching…</div>}
+                  {!startLoading &&
+                    startResults.map((result, idx) => (
+                      <button key={idx} className="trip-search-result" onClick={() => handleSelectStartResult(result)}>
+                        {result.display_name}
+                      </button>
+                    ))}
+                  {!startLoading && startSearchError && (
+                    <div className="trip-search-status trip-search-status--error">Search is temporarily unavailable. Try again.</div>
+                  )}
+                  {!startLoading && !startSearchError && startResults.length === 0 && (
+                    <div className="trip-search-status">No places found</div>
+                  )}
+                  <div className="trip-search-attribution">Search powered by OpenStreetMap data</div>
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              className="trip-search-swap"
+              onClick={handleSwapStartAndDestination}
+              disabled={!customStart || !destination}
+              title="Swap start and destination"
+            >
+              ⇅
+            </button>
+
+            <div className="trip-search-field-group">
+              <span className="trip-search-icon trip-search-icon-destination" aria-hidden="true" />
+              <input
+                type="text"
+                className="trip-search-input"
+                placeholder="Search for a destination…"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setShowSearchResults(true);
+                }}
+                onFocus={() => setShowSearchResults(true)}
+              />
+              {showSearchResults && searchQuery.trim().length === 0 && recentDestinations.length > 0 && (
+                <div className="trip-search-results">
+                  <div className="trip-search-section-label">Recent</div>
+                  {recentDestinations.map((result, idx) => (
+                    <button
+                      key={idx}
+                      className="trip-search-result"
+                      onClick={() => handleSelectSearchResult(result)}
+                    >
+                      🕑 {result.display_name}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {showSearchResults && searchQuery.trim().length >= 3 && (
+                <div className="trip-search-results">
+                  {searchLoading && <div className="trip-search-status">Searching…</div>}
+                  {!searchLoading &&
+                    searchResults.map((result, idx) => (
+                      <button
+                        key={idx}
+                        className="trip-search-result"
+                        onClick={() => handleSelectSearchResult(result)}
+                      >
+                        {result.display_name}
+                      </button>
+                    ))}
+                  {!searchLoading && searchError && (
+                    <div className="trip-search-status trip-search-status--error">Search is temporarily unavailable. Try again.</div>
+                  )}
+                  {!searchLoading && !searchError && searchResults.length === 0 && (
+                    <div className="trip-search-status">No places found</div>
+                  )}
+                  <div className="trip-search-attribution">Search powered by OpenStreetMap data</div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        {routeOptions.length > 1 && (
+          <div className="route-picker">
+            {routeOptions.map((option, idx) => {
+              const minutes = option.duration_seconds != null ? Math.round(option.duration_seconds / 60) : null;
+              const km = option.distance_meters != null ? (option.distance_meters / 1000).toFixed(1) : null;
+              return (
+                <button
+                  key={idx}
+                  className={`route-picker-option ${idx === selectedRouteIndex ? 'route-picker-option--selected' : ''}`}
+                  onClick={() => setSelectedRouteIndex(idx)}
+                >
+                  <span className="route-picker-time">{minutes !== null ? `${minutes} min` : `Route ${idx + 1}`}</span>
+                  {km !== null && <span className="route-picker-distance">{km} km</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {(destination && navigationPhase !== 'arrived' && !navigationStarted && (customStart || userLocation)) && (
+          <div className={`start-navigation-card ${routePreviewFocused ? "is-focused" : ""}`} aria-live="polite">
+            <div className="start-navigation-route-head">
+              <div>
+                <span className="start-navigation-eyebrow">TRIP PREVIEW</span>
+                <strong>{routeLoading ? 'Building your route…' : routeError ? 'Route unavailable' : 'Ready to go'}</strong>
+              </div>
+              <span className="start-navigation-destination">{searchQuery || 'Destination selected'}</span>
+            </div>
+            {route && !routeLoading && !routeError ? (
+              <div className="start-navigation-metrics">
+                <div><strong>{route.duration_seconds != null ? Math.max(1, Math.round(route.duration_seconds / 60)) : '--'}</strong><span>min</span></div>
+                <div><strong>{route.distance_meters != null ? (route.distance_meters / 1609.344).toFixed(1) : '--'}</strong><span>mi</span></div>
+                <div><strong>{routeRisk.count}</strong><span>{routeRisk.count === 1 ? 'road alert' : 'road alerts'}</span></div>
+              </div>
+            ) : (
+              <div className={`start-navigation-status ${routeError ? 'is-error' : ''}`}>
+                {routeError ?? 'Finding the best drivable route…'}
+              </div>
+            )}
+            <div className="start-navigation-actions">
+              <button type="button" className="start-navigation-secondary" onClick={() => setRoutePreviewFocused((v) => !v)}>
+                {routePreviewFocused ? 'Route details' : 'Hide details'}
+              </button>
+              <button
+                type="button"
+                className="start-navigation-button"
+                onClick={handleStartNavigation}
+                disabled={!route || routeLoading || !!routeError}
+              >
+                <span className="start-navigation-button-icon">➤</span>
+                <span>{routeLoading ? 'Building route…' : 'Enter navigation'}</span>
+              </button>
+            </div>
+          </div>
+        )}
+        {navigationStarted && routeLoading && (
+          <div className="navigation-recalculating" role="status">
+            <span className="navigation-recalculating-dot" />
+            Recalculating your route…
+          </div>
+        )}
+        {navigationPhase === 'arrived' && destination && (
+          <div className="arrival-card" role="status">
+            <div className="arrival-card-check">✓</div>
+            <div>
+              <span className="arrival-card-eyebrow">ARRIVED</span>
+              <strong>{searchQuery || 'Destination'}</strong>
+            </div>
+            <button type="button" onClick={() => { clearNavigationSession(); setDestination(null); setRouteOptions([]); dispatchNavigation({ type: 'RESET' }); setSearchQuery(''); }}>Done</button>
+          </div>
+        )}
+        <MapContainer
+          ref={mapRef}
+          center={userLocation ? [userLocation.lat, userLocation.lng] : [37.7749, -122.4194]}
+          zoom={13}
+          style={{ height: '100%', width: '100%' }}
+        >
+          <TileLayer url={getLeafletTileUrl(theme)} attribution={getLeafletAttribution()} />
+          {userLocation && (
+            <Marker
+              position={[userLocation.lat, userLocation.lng]}
+              icon={
+                headingDeg !== null
+                  ? L.divIcon({
+                      html: `<div class="vehicle-arrow-wrap" style="transform: rotate(${headingDeg}deg)"><svg width="32" height="32" viewBox="0 0 32 32" class="vehicle-arrow-svg"><path class="vehicle-arrow-path" d="M16 2 L28 28 L16 22 L4 28 Z"/></svg></div>`,
+                      className: 'vehicle-marker-icon',
+                      iconSize: [32, 32],
+                      iconAnchor: [16, 16],
+                    })
+                  : L.divIcon({
+                      html: `<div class="vehicle-dot"></div>`,
+                      className: 'vehicle-marker-icon',
+                      iconSize: [18, 18],
+                      iconAnchor: [9, 9],
+                    })
+              }
+            >
+              <Popup>Your Location</Popup>
+            </Marker>
+          )}
+          {destination && (
+            <Marker position={[destination.lat, destination.lng]}>
+              <Popup>Destination</Popup>
+            </Marker>
+          )}
+          {route &&
+            route.segments.map((segment, idx) => {
+              const positions = segment.coords.map((c) => [c.lat, c.lng] as [number, number]);
+              // Dark casing underneath + bright amber fill on top — the
+              // standard nav-app route treatment, needed for legibility
+              // against any basemap (especially satellite imagery, whose
+              // colors are unpredictable). Casing color is fixed regardless
+              // of app theme since it's about contrast with the *map*, not
+              // matching the UI chrome. Literal hex values here, not CSS
+              // var() — Leaflet sets these as raw SVG attributes, which
+              // don't resolve CSS custom properties the way stylesheet
+              // rules do.
+              return (
+                <React.Fragment key={idx}>
+                  <Polyline positions={positions} color="#0b0c0e" weight={10} opacity={0.9} />
+                  <Polyline positions={positions} color={ROUTE_LINE_COLOR[theme]} weight={6} />
+                </React.Fragment>
+              );
+            })}
+          {reports.map((report) => {
+            const meta = REPORT_TYPE_META[report.type] ?? { label: report.type, emoji: '📍' };
+            return (
+              <Marker
+                key={report.id}
+                position={[report.location.lat, report.location.lng]}
+                icon={L.divIcon({
+                  html: `<div class="report-marker">${meta.emoji}</div>`,
+                  className: '',
+                  iconSize: [28, 28],
+                })}
+              >
+                <Popup>
+                  <div>
+                    <p>
+                      <strong>{meta.label}</strong>
+                    </p>
+                    <p>
+                      👍 {report.confirmations} still there &nbsp; 👎 {report.dismissals} gone
+                    </p>
+                    <button onClick={() => handleConfirmReport(report)}>Still there</button>{' '}
+                    <button onClick={() => handleDismissReport(report)}>Not there</button>
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          })}
+          {billboards.map((billboard) => {
+            const loc = billboard.location as Location;
+            const isMine = billboard.purchased_by === currentUserId;
+            const isFormOpen = billboardFormId === billboard.id;
+            return (
+              <Marker
+                key={billboard.id}
+                position={[loc.lat, loc.lng]}
+                icon={L.divIcon({
+                  html: `<div class="billboard-marker">📢</div>`,
+                  className: '',
+                  iconSize: [28, 28],
+                })}
+              >
+                <Popup minWidth={220}>
+                  <div>
+                    {billboard.is_purchased && billboard.ad_image_url ? (
+                      <div>
+                        <img
+                          src={billboard.ad_image_url}
+                          alt="Advertisement"
+                          style={{ width: '100%', maxHeight: 100, objectFit: 'cover', cursor: 'pointer' }}
+                          onClick={() => handleBillboardAdClick(billboard)}
+                        />
+                        <p style={{ fontSize: 12, color: '#666' }}>
+                          {billboard.click_count} click{billboard.click_count === 1 ? '' : 's'}
+                          {billboard.display_end &&
+                            ` · displaying until ${new Date(billboard.display_end).toLocaleString()}`}
+                        </p>
+                        {isMine && <p style={{ fontSize: 12 }}>This is your billboard</p>}
+                      </div>
+                    ) : isFormOpen ? (
+                      <div className="billboard-form">
+                        <input
+                          type="text"
+                          placeholder="Ad image URL"
+                          value={billboardFormAdImage}
+                          onChange={(e) => setBillboardFormAdImage(e.target.value)}
+                        />
+                        <input
+                          type="text"
+                          placeholder="Ad target URL (where clicks go)"
+                          value={billboardFormAdTarget}
+                          onChange={(e) => setBillboardFormAdTarget(e.target.value)}
+                        />
+                        <select
+                          value={billboardFormDurationHours}
+                          onChange={(e) => setBillboardFormDurationHours(Number(e.target.value))}
+                        >
+                          <option value={24}>24 hours</option>
+                          <option value={24 * 7}>7 days</option>
+                          <option value={24 * 30}>30 days (max)</option>
+                        </select>
+                        {billboardError && <p className="billboard-form-error">{billboardError}</p>}
+                        <button onClick={handlePurchaseBillboard} disabled={billboardSubmitting}>
+                          {billboardSubmitting ? 'Booking...' : 'Book this billboard'}
+                        </button>
+                        <button onClick={() => setBillboardFormId(null)}>Cancel</button>
+                      </div>
+                    ) : (

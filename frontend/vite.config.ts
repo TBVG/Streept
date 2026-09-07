@@ -16,8 +16,4 @@ export default defineConfig({
       },
     },
   },
-  define: {
-    // Cesium configuration
-    'process.env': {},
-  },
 });

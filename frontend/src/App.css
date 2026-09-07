@@ -1,7 +1,155 @@
+:root {
+  /* Asphalt-at-night palette — drawn from the road itself, not a generic
+     dark-mode default. Two accents carry distinct meaning: amber is your
+     route, teal is live data from other people (reports, parking). */
+  --asphalt: #18181b;
+  --surface: #232428;
+  --surface-raised: #2b2c31;
+  --surface-line: #38393f;
+
+  --route-amber: #2d7ff9;
+  --route-amber-dim: #1767d2;
+  --route-blue: #2d7ff9;
+  --signal-teal: #3fbdb0;
+  --alert-red: #e5484d;
+
+  --paper: #edeae3;
+  --paper-dim: #9c988f;
+
+  --font-display: 'Barlow', 'Barlow Condensed', sans-serif;
+  --font-condensed: 'Barlow Condensed', 'Barlow', sans-serif;
+  --font-body: 'Public Sans', sans-serif;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-pill: 999px;
+  --shadow-panel: 0 4px 20px rgba(0, 0, 0, 0.45);
+}
+
+/* Daylight variant — same road-marking material world (concrete,
+   lane paint, signage) rendered for daytime instead of night. Token
+   *names* stay the same across themes so every component's CSS (which
+   references var(--asphalt), var(--paper), etc.) re-themes automatically
+   without needing per-component light/dark rules. */
+[data-theme='light'] {
+  --asphalt: #f4f2ed;
+  --surface: #ffffff;
+  --surface-raised: #f7f5f0;
+  --surface-line: #e2ded4;
+
+  --route-amber: #1767d2;
+  --route-amber-dim: #0e55b9;
+  --route-blue: #1767d2;
+  --signal-teal: #1f8f84;
+  --alert-red: #c93b40;
+
+  --paper: #201f1c;
+  --paper-dim: #6b675f;
+
+  --shadow-panel: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  background: var(--asphalt);
+  color: var(--paper);
+}
+
+/* A dashed lane-line, used as a structural divider throughout — literal
+   road-paint semantics doing a UI job. Usage: <div class="lane-divider" /> */
+.lane-divider {
+  height: 0;
+  border-top: 2px dashed var(--route-amber);
+  opacity: 0.55;
+}
+
 .App {
   width: 100%;
   height: 100vh;
   display: flex;
   flex-direction: column;
+  background: var(--asphalt);
 }
 
+.theme-toggle {
+  padding: 9px 12px;
+  border: 1px solid var(--surface-line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  box-shadow: var(--shadow-panel);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+
+.network-banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4000;
+  background: var(--surface);
+  color: var(--paper);
+  border: 1px solid var(--surface-line);
+  border-radius: var(--radius-pill);
+  padding: 8px 14px;
+  box-shadow: var(--shadow-panel);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* UI 8 — Streept visual identity: one material language across every screen. */
+:root {
+  --font-display: 'Barlow', 'Barlow Condensed', sans-serif;
+  --font-condensed: 'Barlow Condensed', 'Barlow', sans-serif;
+  --font-body: 'Public Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --control-height: 44px;
+  --shadow-panel: 0 14px 40px rgba(0, 0, 0, .26), 0 2px 8px rgba(0,0,0,.14);
+}
+
+[data-theme='light'] { --shadow-panel: 0 14px 36px rgba(31, 29, 24, .12), 0 2px 8px rgba(31, 29, 24, .06); }
+
+.App { color: var(--paper); letter-spacing: -0.005em; }
+.theme-toggle { min-height: var(--control-height); color: var(--paper); font-weight: 650; }
+.network-banner { border-color: color-mix(in srgb, var(--alert-red) 30%, var(--surface-line)); }
+
+/* Shared semantic surfaces */
+.brand-mark { letter-spacing: .08em; }
+.home-command-center, .destination-command-center, .arrival-experience,
+.nav-cockpit, .map-intelligence-strip, .layers-panel, .parking-discovery-panel,
+.trip-search-fields, .trip-search-results, .route-picker-option, .start-navigation-card {
+  backdrop-filter: blur(18px) saturate(1.12);
+}
+
+/* Consistent action hierarchy */
+.primary-action, .start-navigation-button, .destination-parking-navigate,
+.arrival-parking-go, .nav-cockpit-end, .nav-cockpit-3d {
+  min-height: 40px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+/* Live data should feel alive, not flashy. */
+.home-live-dot, .arrival-live::first-letter { color: var(--signal-teal); }
+.home-live-dot { animation: streept-live-pulse 2.2s ease-in-out infinite; }
+@keyframes streept-live-pulse { 0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal-teal) 35%, transparent); } 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--signal-teal) 0%, transparent); } }
+
+/* Cleaner, denser scrollbars for desktop panels. */
+* { scrollbar-width: thin; scrollbar-color: var(--surface-line) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--surface-line); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+
+@media (max-width: 700px) {
+  :root { --control-height: 42px; }
+}

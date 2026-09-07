@@ -18,3 +18,45 @@ body {
   height: 100vh;
 }
 
+
+/* STREEPT UI 8 — product-wide foundation */
+:root {
+  --streept-bg: var(--asphalt);
+  --streept-surface: var(--surface);
+  --streept-surface-2: var(--surface-raised);
+  --streept-border: var(--surface-line);
+  --streept-text: var(--paper);
+  --streept-muted: var(--paper-dim);
+  --streept-primary: var(--route-blue);
+  --streept-live: var(--signal-teal);
+  --streept-danger: var(--alert-red);
+  --streept-control-h: 44px;
+  --streept-radius-xs: 6px;
+  --streept-radius-sm: 10px;
+  --streept-radius-md: 14px;
+  --streept-radius-lg: 18px;
+  --streept-shadow: var(--shadow-panel);
+  --streept-fast: 120ms;
+  --streept-normal: 180ms;
+  --streept-slow: 280ms;
+}
+
+html { background: var(--streept-bg); }
+body { min-width: 320px; }
+
+button, input, select, textarea { font: inherit; }
+button { -webkit-tap-highlight-color: transparent; }
+button:not(:disabled), [role='button'] { transition: transform var(--streept-fast) ease, background-color var(--streept-normal) ease, border-color var(--streept-normal) ease, box-shadow var(--streept-normal) ease, opacity var(--streept-normal) ease; }
+button:not(:disabled):hover { transform: translateY(-1px); }
+button:not(:disabled):active { transform: translateY(0) scale(.98); }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--streept-primary);
+  outline-offset: 2px;
+}
+button:disabled { opacity: .55; }
+
+::selection { background: color-mix(in srgb, var(--streept-primary) 30%, transparent); color: var(--streept-text); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}

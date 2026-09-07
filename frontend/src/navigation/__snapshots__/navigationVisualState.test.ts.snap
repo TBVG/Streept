@@ -1,0 +1,56 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`navigation visual regression contract > covers every lifecycle state with deterministic output 1`] = `
+[
+  {
+    "guidanceUrgency": "none",
+    "laneGuidance": null,
+    "mode": "idle",
+    "showArrival": false,
+    "showGpsWarning": false,
+    "showImmersivePreview": false,
+    "showRerouteIndicator": false,
+    "showRoute": false,
+  },
+  {
+    "guidanceUrgency": "none",
+    "laneGuidance": "Stay in this lane",
+    "mode": "preview",
+    "showArrival": false,
+    "showGpsWarning": false,
+    "showImmersivePreview": true,
+    "showRerouteIndicator": false,
+    "showRoute": true,
+  },
+  {
+    "guidanceUrgency": "normal",
+    "laneGuidance": "Stay in this lane",
+    "mode": "active",
+    "showArrival": false,
+    "showGpsWarning": false,
+    "showImmersivePreview": false,
+    "showRerouteIndicator": false,
+    "showRoute": true,
+  },
+  {
+    "guidanceUrgency": "normal",
+    "laneGuidance": null,
+    "mode": "rerouting",
+    "showArrival": false,
+    "showGpsWarning": false,
+    "showImmersivePreview": false,
+    "showRerouteIndicator": true,
+    "showRoute": true,
+  },
+  {
+    "guidanceUrgency": "none",
+    "laneGuidance": null,
+    "mode": "arrived",
+    "showArrival": true,
+    "showGpsWarning": false,
+    "showImmersivePreview": false,
+    "showRerouteIndicator": false,
+    "showRoute": true,
+  },
+]
+`;

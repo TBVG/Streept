@@ -1,0 +1,55 @@
+{
+  "version": 2,
+  "session": {
+    "states": [
+      "idle",
+      "previewing",
+      "navigating",
+      "rerouting",
+      "arrived"
+    ]
+  },
+  "location": [
+    "lat",
+    "lng",
+    "accuracyM",
+    "speedMps",
+    "headingDeg",
+    "timestampMs"
+  ],
+  "offline": {
+    "scope": "trip-or-region",
+    "liveTraffic": false,
+    "package": {
+      "route": true,
+      "maneuverScenes": true,
+      "createdAt": "unix-ms",
+      "maxAgeHours": 24
+    }
+  },
+  "providers": [
+    "routing",
+    "mapMatching",
+    "traffic",
+    "scene"
+  ],
+  "telemetry": {
+    "events": [
+      "session_started",
+      "session_resumed",
+      "route_selected",
+      "maneuver_reached",
+      "reroute",
+      "arrival",
+      "gps_quality_change",
+      "immersive_transition"
+    ],
+    "locationPrecision": "client-defined",
+    "retention": "provider-defined"
+  },
+  "native": {
+    "backgroundLocation": true,
+    "carPlayReady": false,
+    "androidAutoReady": false
+  }
+}

@@ -17,6 +17,12 @@ impl Database {
         Ok(Database { pool })
     }
 
+    /// Wraps an already-connected pool. See AppState::from_pool_for_test
+    /// for the primary use case (tests).
+    pub fn from_pool(pool: PgPool) -> Self {
+        Database { pool }
+    }
+
     pub fn pool(&self) -> &PgPool {
         &self.pool
     }

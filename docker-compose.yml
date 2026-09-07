@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgis/postgis:14-3.3
@@ -8,7 +6,10 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5432:5432"
+      # Keep PostgreSQL off the common host port so verification can run
+      # alongside another local Postgres/container without a bind conflict.
+      # Override with STREEPT_POSTGRES_PORT=5432 when that port is free.
+      - "${STREEPT_POSTGRES_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -22,35 +23,44 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "3001:3000"
+      - "3001:3001"
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/navigation_app
       JWT_SECRET: ${JWT_SECRET:-dev-secret-key-change-in-production}
-      OSRM_URL: ${OSRM_URL:-http://osrm:5000}
-      PARKING_HEARTBEAT_TTL_MINUTES: ${PARKING_HEARTBEAT_TTL_MINUTES:-15}
+      OSRM_URL: ${OSRM_URL:-https://router.project-osrm.org}
+      ROUTING_URL: ${ROUTING_URL:-https://router.project-osrm.org}
+      TRAFFIC_REFRESH_SECONDS: ${TRAFFIC_REFRESH_SECONDS:-30}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      ROUTE_CACHE_TTL_SECONDS: ${ROUTE_CACHE_TTL_SECONDS:-30}
+      CONTACT_EMAIL: ${CONTACT_EMAIL:-set-a-real-contact-email@example.com}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3001/health >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy
-    volumes:
-      - ./backend:/app
-      - cargo_cache:/usr/local/cargo/registry
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api}
+        VITE_WS_URL: ${VITE_WS_URL:-/ws}
     ports:
       - "3000:3000"
-    environment:
-      VITE_API_URL: http://localhost:3001/api
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3000/health >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     depends_on:
-      - backend
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+      backend:
+        condition: service_healthy
 
 volumes:
   postgres_data:
-  cargo_cache:
 
