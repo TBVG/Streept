@@ -39,7 +39,9 @@ function clamp01(value: number): number {
 export function decideDriverAction(input: DriverDecisionInput): DriverDecision {
   const spatial = input.spatial;
   const guidance = input.guidance;
-  const lane = spatial.laneIntelligence;
+  const lane = spatial.laneIntelligence ?? { currentLaneIndex: null, recommendedLaneIndices: [], laneAlignment: 'unknown' as const, laneChangeDirection: 'unknown' as const, requiredLaneChanges: 0, confidence: 0 };
+  const hazard = spatial.hazardIntelligence ?? { level: 'none' as const, nearbyCriticalReports: 0, nearbyTrafficJams: 0, nearbyClosedLanes: 0, confidence: 0 };
+  const intersection = spatial.intersectionIntelligence ?? { complexity: 'simple' as const, preparationDistanceMeters: 0, behavior: 'unknown' as const, confidence: 0 };
   const baseConfidence = clamp01(Math.min(spatial.confidence, guidance.confidence));
 
   if (input.restrictionProhibited && input.restrictionConfidence >= 0.65) {
@@ -50,25 +52,25 @@ export function decideDriverAction(input: DriverDecisionInput): DriverDecision {
     };
   }
 
-  if (spatial.hazardIntelligence.level === 'critical') {
+  if (hazard.level === 'critical') {
     return {
       action: 'high-alert', priority: 'critical',
-      confidence: clamp01(Math.min(baseConfidence || 1, spatial.hazardIntelligence.confidence || baseConfidence)),
-      reason: spatial.hazardIntelligence.nearbyClosedLanes > 0 ? 'closed-lane-nearby' : 'road-hazard-nearby',
+      confidence: clamp01(Math.min(baseConfidence || 1, hazard.confidence || baseConfidence)),
+      reason: hazard.nearbyClosedLanes > 0 ? 'closed-lane-nearby' : 'road-hazard-nearby',
       targetSpeedMps: guidance.targetSpeedMps,
       laneChangeDirection: lane.laneChangeDirection,
       targetLaneIndex: lane.recommendedLaneIndices[0] ?? null,
     };
   }
 
-  if (spatial.intersectionIntelligence.complexity === 'complex' &&
-      spatial.intersectionIntelligence.preparationDistanceMeters > 0 &&
+  if (intersection.complexity === 'complex' &&
+      intersection.preparationDistanceMeters > 0 &&
       spatial.maneuverDistanceMeters != null &&
-      spatial.maneuverDistanceMeters <= spatial.intersectionIntelligence.preparationDistanceMeters) {
+      spatial.maneuverDistanceMeters <= intersection.preparationDistanceMeters) {
     return {
       action: 'prepare', priority: 'elevated',
-      confidence: clamp01(Math.min(baseConfidence, spatial.intersectionIntelligence.confidence)),
-      reason: `complex-${spatial.intersectionIntelligence.behavior}-approach`,
+      confidence: clamp01(Math.min(baseConfidence, intersection.confidence)),
+      reason: `complex-${intersection.behavior}-approach`,
       targetSpeedMps: guidance.targetSpeedMps,
       laneChangeDirection: lane.laneChangeDirection,
       targetLaneIndex: lane.recommendedLaneIndices[0] ?? null,

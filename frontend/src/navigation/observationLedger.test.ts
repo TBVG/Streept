@@ -36,7 +36,7 @@ describe('spatial observation ledger', () => {
 describe('SpatialObservationLedger cloud sync', () => {
   it('uploads pending observations and marks them synced', async () => {
     const ledger = new SpatialObservationLedger(() => 1000);
-    ledger.recordHazard(spatial, 4);
+    ledger.recordHazard({ ...spatial, hazardIntelligence: { ...spatial.hazardIntelligence, level: 'elevated' } }, 4);
     expect(ledger.pending()).toHaveLength(1);
     const sent: SpatialObservation[] = [];
     const uploaded = await ledger.flushToCloud(async (batch) => { sent.push(...batch); }, 50);
@@ -48,7 +48,7 @@ describe('SpatialObservationLedger cloud sync', () => {
 
   it('keeps observations pending when upload fails', async () => {
     const ledger = new SpatialObservationLedger(() => 1000);
-    ledger.recordHazard(spatial, 5);
+    ledger.recordHazard({ ...spatial, hazardIntelligence: { ...spatial.hazardIntelligence, level: 'elevated' } }, 5);
     const uploaded = await ledger.flushToCloud(async () => { throw new Error('offline'); });
     expect(uploaded).toBe(0);
     expect(ledger.pending()).toHaveLength(1);

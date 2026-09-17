@@ -86,7 +86,7 @@ export function getLaneRecommendations(maneuver: Maneuver): LaneRecommendation[]
   const lanes: LaneInfo[] = maneuver.lanes ?? [];
   if (!lanes.length) return [];
   const scored = lanes.map((lane, laneIndex) => {
-    const indications = normalized(lane.indications);
+    const indications = normalized(lane.indications ?? []);
     let score = lane.valid ? 0.55 : 0.05;
     if (matchesTarget(indications, maneuver.modifier, maneuver.type)) score += 0.42;
     if (indications.includes('straight') && maneuver.modifier === 'straight') score += 0.1;
@@ -109,7 +109,7 @@ export function buildLaneTopology(maneuver: Maneuver): LaneTopology[] {
       allowedChanges: permissions,
       destination: lane.destination ?? null,
       recommended: recs[laneIndex]?.preferred ?? false,
-      indications: normalized(lane.indications),
+      indications: normalized(lane.indications ?? []),
     };
   });
 }

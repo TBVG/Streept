@@ -130,7 +130,7 @@ async fn duplicate_email_registration_fails(pool: PgPool) -> sqlx::Result<()> {
 async fn concurrent_checkins_to_same_lot_both_succeed_and_count_correctly(pool: PgPool) -> sqlx::Result<()> {
     let state = test_state(pool);
     // 'park1' comes from the seed data in the initial migration.
-    let request = || Json(ParkingCheckinRequest { lot_id: "park1".to_string() });
+    let request = || Json(ParkingCheckinRequest { lot_id: "park1".to_string(), location: None });
 
     let state_a = state.clone();
     let state_b = state.clone();
@@ -171,7 +171,7 @@ async fn checking_into_a_new_lot_releases_the_previous_one(pool: PgPool) -> sqlx
     handlers::checkin_parking(
         State(state.clone()),
         fake_user("user-a"),
-        Json(ParkingCheckinRequest { lot_id: "park1".to_string() }),
+        Json(ParkingCheckinRequest { lot_id: "park1".to_string(), location: None }),
     )
     .await
     .expect("handler shouldn't error");
@@ -182,7 +182,7 @@ async fn checking_into_a_new_lot_releases_the_previous_one(pool: PgPool) -> sqlx
     handlers::checkin_parking(
         State(state.clone()),
         fake_user("user-a"),
-        Json(ParkingCheckinRequest { lot_id: "park2".to_string() }),
+        Json(ParkingCheckinRequest { lot_id: "park2".to_string(), location: None }),
     )
     .await
     .expect("handler shouldn't error");
@@ -212,7 +212,7 @@ async fn checkout_decrements_the_lot(pool: PgPool) -> sqlx::Result<()> {
     handlers::checkin_parking(
         State(state.clone()),
         fake_user("user-a"),
-        Json(ParkingCheckinRequest { lot_id: "park1".to_string() }),
+        Json(ParkingCheckinRequest { lot_id: "park1".to_string(), location: None }),
     )
     .await
     .expect("handler shouldn't error");
@@ -242,7 +242,7 @@ async fn checkout_decrements_the_lot(pool: PgPool) -> sqlx::Result<()> {
 #[sqlx::test]
 async fn repeat_checkin_to_same_lot_does_not_double_count(pool: PgPool) -> sqlx::Result<()> {
     let state = test_state(pool);
-    let request = || Json(ParkingCheckinRequest { lot_id: "park1".to_string() });
+    let request = || Json(ParkingCheckinRequest { lot_id: "park1".to_string(), location: None });
 
     handlers::checkin_parking(State(state.clone()), fake_user("user-a"), request())
         .await

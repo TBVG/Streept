@@ -24,7 +24,8 @@ function speedLimitMps(kph: number | null): number | null {
  */
 export function decideSpatialGuidance(snapshot: SpatialIntelligenceSnapshot, currentSpeedMps: number | null = null): SpatialGuidanceDecision {
   const confidence = clamp01(snapshot.confidence);
-  const hazard = snapshot.hazardIntelligence;
+  const hazard = snapshot.hazardIntelligence ?? { level: 'none' as const, nearbyCriticalReports: 0, nearbyTrafficJams: 0, nearbyClosedLanes: 0, confidence: 0 };
+  const lane = snapshot.laneIntelligence ?? { currentLaneIndex: null, recommendedLaneIndices: [], laneAlignment: 'unknown' as const, laneChangeDirection: 'unknown' as const, requiredLaneChanges: 0, confidence: 0 };
 
   // A directly observed critical road report is actionable even when the
   // broader scene match is weak. Never let missing scene geometry erase a
@@ -56,8 +57,8 @@ export function decideSpatialGuidance(snapshot: SpatialIntelligenceSnapshot, cur
   if (hazard.level === 'elevated') {
     return { action: 'prepare', confidence: Math.min(confidence, hazard.confidence || confidence), priority: 'elevated', reason: 'traffic-hazard-nearby', targetSpeedMps: null };
   }
-  if (snapshot.laneIntelligence.laneAlignment === 'misaligned' && snapshot.laneIntelligence.requiredLaneChanges > 0) {
-    return { action: 'prepare', confidence: Math.min(confidence, snapshot.laneIntelligence.confidence), priority: 'elevated', reason: 'recommended-lane-change', targetSpeedMps: null };
+  if (lane.laneAlignment === 'misaligned' && lane.requiredLaneChanges > 0) {
+    return { action: 'prepare', confidence: Math.min(confidence, lane.confidence), priority: 'elevated', reason: 'recommended-lane-change', targetSpeedMps: null };
   }
   if (snapshot.nearbySignals > 0 || snapshot.nearbyCrossings > 0) {
     return { action: 'prepare', confidence, priority: 'elevated', reason: 'nearby-road-user-control', targetSpeedMps: null };

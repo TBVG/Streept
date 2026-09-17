@@ -86,7 +86,7 @@ export class ManeuverOutcomeTracker {
       const completed = this.approached;
       if (completed) this.completedCount += 1;
       else this.missedCount += 1;
-      this.lastOutcome = {
+      const transitionOutcome: ManeuverOutcome = {
         status: completed ? 'completed' : 'missed',
         maneuverKey: this.activeKey,
         instruction: this.activeInstruction,
@@ -95,7 +95,11 @@ export class ManeuverOutcomeTracker {
         completedCount: this.completedCount,
         missedCount: this.missedCount,
       };
-      this.approached = false;
+      this.activeKey = key;
+      this.activeInstruction = maneuver.instruction ?? null;
+      this.approached = distance <= APPROACH_METERS;
+      this.lastOutcome = transitionOutcome;
+      return transitionOutcome;
     }
 
     this.activeKey = key;

@@ -26,7 +26,8 @@ export class SpatialGuidanceStabilizer {
 
     const currentRank = this.rank(this.current.action);
     const nextRank = this.rank(next.action);
-    const escalation = nextRank > currentRank;
+    const safetyEscalation = next.action === 'uncertain' && this.current.action !== 'uncertain';
+    const escalation = safetyEscalation || nextRank > currentRank;
     const same = next.action === this.current.action && next.reason === this.current.reason;
 
     if (same) {

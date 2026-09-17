@@ -31,7 +31,8 @@ export function scoreRoadIntelligence(observations: SpatialObservation[], wayId:
   const missRate = missed / Math.max(1, completed + missed);
   const laneRate = laneMisalignments / n;
   const hazardRate = hazards / n;
-  const raw = 100 * (0.55 * missRate + 0.25 * laneRate + 0.20 * hazardRate);
+  const repeatMissBonus = Math.min(20, Math.max(0, missed - 2) * 4);
+  const raw = 100 * (0.55 * missRate + 0.25 * laneRate + 0.20 * hazardRate) + repeatMissBonus;
   const confidence = clamp01(n / 8) * clamp01(relevant.reduce((sum, o) => sum + o.confidence, 0) / n);
   return { wayId, score: Math.round(raw), observations: n, completed, missed, laneMisalignments, hazards, confidence };
 }

@@ -139,8 +139,12 @@ export function assessLaneChangeTrafficSafety(input: LaneChangeTrafficSafetyInpu
       // conservative front/rear gaps instead of using only 2-D distance.
       const longitudinalGap = Math.abs(projected.alongMeters - midpoint);
       nearestLongitudinalGap = Math.min(nearestLongitudinalGap, longitudinalGap);
-      if (projected.alongMeters >= midpoint) gapAhead = Math.min(gapAhead, longitudinalGap);
-      else gapBehind = Math.min(gapBehind, longitudinalGap);
+      // gapAhead/gapBehind describe where the observed vehicle sits relative
+      // to the start of the lane-change corridor; the safety gate below still
+      // evaluates the stricter merge-point gap. This keeps diagnostics useful
+      // even when a vehicle is just before the midpoint.
+      if (projected.alongMeters >= 0) gapAhead = Math.min(gapAhead, projected.alongMeters);
+      if (projected.alongMeters < 0) gapBehind = Math.min(gapBehind, Math.abs(projected.alongMeters));
 
       // If both speeds/headings are available, predict the occupant through the
       // entire lane-change trajectory. A single merge-point check can miss a

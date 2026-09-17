@@ -9,8 +9,8 @@ export function buildSceneAttention(scene:SceneContext|null, center:Location|nul
  if(!scene||!center)return [];
  const out:SceneAttention[]=[];
  const add=(p:Location,tier:SceneAttentionTier,boost:number,reason:string)=>{const distance=d(center,p); if(distance<=260) out.push({location:p,tier,score:score(distance,boost),reason});};
- for(const p of scene.signals??[]) add(p,'critical',.32,'traffic-signal');
- for(const p of scene.crossings??[]) add(p,'critical',.26,'pedestrian-crossing');
+ for(const p of scene.signals??[]) add(p,'critical',.45,'traffic-signal');
+ for(const p of scene.crossings??[]) add(p,'critical',.34,'pedestrian-crossing');
  if(maneuver) add(maneuver,'guidance',.38,'upcoming-maneuver');
  for(const r of scene.roads??[]) { const p=r.geometry[0]; if(p) add(p,'world',(r.bridge || r.tunnel) ? 0.12 : 0,'road-context'); }
  for(const p of scene.trees??[]) add(p,'ambient',-.08,'ambient-world');
