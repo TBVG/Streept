@@ -15,6 +15,7 @@ const spatial: SpatialIntelligenceSnapshot = {
 describe('spatial observation ledger', () => {
   it('stores coarse maneuver outcomes without raw GPS', () => {
     const ledger = new SpatialObservationLedger(() => 123);
+    ledger.clear();
     ledger.recordManeuverOutcome({ status: 'completed', maneuverKey: 'turn|right|1|2', instruction: 'Turn right', laneCompliant: true, distanceAtEvaluationMeters: 40, completedCount: 1, missedCount: 0 }, spatial, 3);
     const result = ledger.snapshot()[0];
     expect(result.type).toBe('maneuver_completed');
@@ -27,6 +28,7 @@ describe('spatial observation ledger', () => {
 
   it('ignores tracking outcomes', () => {
     const ledger = new SpatialObservationLedger();
+    ledger.clear();
     ledger.recordManeuverOutcome({ status: 'tracking', maneuverKey: 'x', instruction: 'x', laneCompliant: null, distanceAtEvaluationMeters: 20, completedCount: 0, missedCount: 0 }, spatial, 1);
     expect(ledger.snapshot()).toHaveLength(0);
   });
@@ -36,6 +38,7 @@ describe('spatial observation ledger', () => {
 describe('SpatialObservationLedger cloud sync', () => {
   it('uploads pending observations and marks them synced', async () => {
     const ledger = new SpatialObservationLedger(() => 1000);
+    ledger.clear();
     ledger.recordHazard({ ...spatial, hazardIntelligence: { ...spatial.hazardIntelligence, level: 'elevated' } }, 4);
     expect(ledger.pending()).toHaveLength(1);
     const sent: SpatialObservation[] = [];
@@ -48,6 +51,7 @@ describe('SpatialObservationLedger cloud sync', () => {
 
   it('keeps observations pending when upload fails', async () => {
     const ledger = new SpatialObservationLedger(() => 1000);
+    ledger.clear();
     ledger.recordHazard({ ...spatial, hazardIntelligence: { ...spatial.hazardIntelligence, level: 'elevated' } }, 5);
     const uploaded = await ledger.flushToCloud(async () => { throw new Error('offline'); });
     expect(uploaded).toBe(0);

@@ -99,6 +99,7 @@ export interface RouteCoord {
 }
 
 export interface LaneInfo {
+  laneIndex?: number;
   indications: string[]; // e.g. ["left"], ["through", "right"]
   valid: boolean;
   recommended?: boolean;

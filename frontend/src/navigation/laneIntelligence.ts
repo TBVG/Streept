@@ -102,13 +102,16 @@ export function getLaneRecommendations(maneuver: Maneuver): LaneRecommendation[]
 export function buildLaneTopology(maneuver: Maneuver): LaneTopology[] {
   const recs = getLaneRecommendations(maneuver);
   const lanes = maneuver.lanes ?? [];
-  return lanes.map((lane, laneIndex) => {
+  return lanes.map((lane, arrayIndex) => {
+    const laneIndex = Number.isInteger(lane.laneIndex) ? lane.laneIndex as number : arrayIndex;
     const permissions = changePermissions(lane);
     return {
       laneIndex,
       allowedChanges: permissions,
       destination: lane.destination ?? null,
-      recommended: recs[laneIndex]?.preferred ?? false,
+      // Preserve explicit route-provider lane intent when present; otherwise
+      // fall back to our deterministic recommendation scorer.
+      recommended: lane.recommended === true || recs[arrayIndex]?.preferred === true,
       indications: normalized(lane.indications ?? []),
     };
   });

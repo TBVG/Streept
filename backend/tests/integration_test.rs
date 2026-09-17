@@ -66,7 +66,7 @@ async fn register_then_login_succeeds(pool: PgPool) -> sqlx::Result<()> {
 async fn login_with_wrong_password_fails(pool: PgPool) -> sqlx::Result<()> {
     let state = test_state(pool);
 
-    handlers::register(
+    let _ = handlers::register(
         State(state.clone()),
         Json(RegisterRequest {
             email: "driver@example.com".to_string(),
@@ -105,7 +105,7 @@ async fn duplicate_email_registration_fails(pool: PgPool) -> sqlx::Result<()> {
         })
     };
 
-    handlers::register(State(state.clone()), make_req())
+    let _ = handlers::register(State(state.clone()), make_req())
         .await
         .expect("first registration should succeed");
 
@@ -168,7 +168,7 @@ async fn concurrent_checkins_to_same_lot_both_succeed_and_count_correctly(pool: 
 async fn checking_into_a_new_lot_releases_the_previous_one(pool: PgPool) -> sqlx::Result<()> {
     let state = test_state(pool);
 
-    handlers::checkin_parking(
+    let _ = handlers::checkin_parking(
         State(state.clone()),
         fake_user("user-a"),
         Json(ParkingCheckinRequest { lot_id: "park1".to_string(), location: None }),
@@ -179,7 +179,7 @@ async fn checking_into_a_new_lot_releases_the_previous_one(pool: PgPool) -> sqlx
     // Same user, different lot, no explicit checkout in between — this is
     // the "left without checking out, and now shows up somewhere else"
     // case the check-in logic needs to reconcile.
-    handlers::checkin_parking(
+    let _ = handlers::checkin_parking(
         State(state.clone()),
         fake_user("user-a"),
         Json(ParkingCheckinRequest { lot_id: "park2".to_string(), location: None }),
@@ -209,7 +209,7 @@ async fn checking_into_a_new_lot_releases_the_previous_one(pool: PgPool) -> sqlx
 async fn checkout_decrements_the_lot(pool: PgPool) -> sqlx::Result<()> {
     let state = test_state(pool);
 
-    handlers::checkin_parking(
+    let _ = handlers::checkin_parking(
         State(state.clone()),
         fake_user("user-a"),
         Json(ParkingCheckinRequest { lot_id: "park1".to_string(), location: None }),
@@ -217,7 +217,7 @@ async fn checkout_decrements_the_lot(pool: PgPool) -> sqlx::Result<()> {
     .await
     .expect("handler shouldn't error");
 
-    handlers::checkout_parking(State(state.clone()), fake_user("user-a"))
+    let _ = handlers::checkout_parking(State(state.clone()), fake_user("user-a"))
         .await
         .expect("checkout should succeed");
 
@@ -244,12 +244,12 @@ async fn repeat_checkin_to_same_lot_does_not_double_count(pool: PgPool) -> sqlx:
     let state = test_state(pool);
     let request = || Json(ParkingCheckinRequest { lot_id: "park1".to_string(), location: None });
 
-    handlers::checkin_parking(State(state.clone()), fake_user("user-a"), request())
+    let _ = handlers::checkin_parking(State(state.clone()), fake_user("user-a"), request())
         .await
         .expect("first check-in should succeed");
     // A repeat check-in to the same lot (e.g. the frontend's periodic
     // detection firing again while still parked) must not increment again.
-    handlers::checkin_parking(State(state.clone()), fake_user("user-a"), request())
+    let _ = handlers::checkin_parking(State(state.clone()), fake_user("user-a"), request())
         .await
         .expect("repeat check-in should succeed");
 
@@ -326,7 +326,7 @@ async fn enough_dismissals_expire_a_report_immediately(pool: PgPool) -> sqlx::Re
 
     // DISMISS_THRESHOLD is 2 (dismissals - confirmations >= 2) — two
     // distinct voters dismissing with no confirmations should trip it.
-    handlers::dismiss_report(State(state.clone()), fake_user("voter-1"), Path(report.id.clone()))
+    let _ = handlers::dismiss_report(State(state.clone()), fake_user("voter-1"), Path(report.id.clone()))
         .await
         .expect("handler shouldn't error");
     let after_second = handlers::dismiss_report(State(state), fake_user("voter-2"), Path(report.id))
@@ -405,7 +405,7 @@ async fn purchased_billboard_is_hidden_until_approved(pool: PgPool) -> sqlx::Res
         id: "admin-user".to_string(),
         is_admin: true,
     };
-    handlers::moderate_billboard(
+    let _ = handlers::moderate_billboard(
         State(state.clone()),
         admin,
         Path("bill1".to_string()),
