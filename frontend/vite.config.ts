@@ -13,6 +13,7 @@ export default defineConfig({
       '/ws': {
         target: 'ws://localhost:3001',
         ws: true,
+        rewrite: (path) => path.replace(/^\/ws/, '/api/ws'),
       },
     },
   },

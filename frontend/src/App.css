@@ -7,10 +7,10 @@
   --surface-raised: #2b2c31;
   --surface-line: #38393f;
 
-  --route-amber: #2d7ff9;
-  --route-amber-dim: #1767d2;
-  --route-blue: #2d7ff9;
-  --signal-teal: #3fbdb0;
+  --route-amber: #20f28a;
+  --route-amber-dim: #16b968;
+  --route-blue: #20f28a;
+  --signal-teal: #4adfbd;
   --alert-red: #e5484d;
 
   --paper: #edeae3;
@@ -37,10 +37,10 @@
   --surface-raised: #f7f5f0;
   --surface-line: #e2ded4;
 
-  --route-amber: #1767d2;
-  --route-amber-dim: #0e55b9;
-  --route-blue: #1767d2;
-  --signal-teal: #1f8f84;
+  --route-amber: #16b968;
+  --route-amber-dim: #0d8d50;
+  --route-blue: #16b968;
+  --signal-teal: #1aa77b;
   --alert-red: #c93b40;
 
   --paper: #201f1c;
@@ -152,4 +152,47 @@ body {
 
 @media (max-width: 700px) {
   :root { --control-height: 42px; }
+}
+
+
+/* AGPL interactive legal notice: compact, always-available, and separate from navigation controls. */
+.legal-notice {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 10000;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 24px);
+  padding: 7px 10px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 999px;
+  background: rgba(18,18,20,.86);
+  color: rgba(255,255,255,.58);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  font-size: 9px;
+  line-height: 1;
+  box-shadow: 0 8px 28px rgba(0,0,0,.18);
+  pointer-events: auto;
+}
+
+.legal-notice a {
+  color: inherit;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.legal-notice a:hover {
+  color: #fff;
+}
+
+@media (max-width: 760px) {
+  .legal-notice {
+    right: 8px;
+    bottom: 8px;
+    font-size: 8px;
+  }
 }

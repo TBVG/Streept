@@ -1,0 +1,6 @@
+import { describe, expect, it } from 'vitest';
+import { classifyRoadCharacter, scoreRoadQuality, summarizeTrip } from './tripIntelligence';
+import { Route3DHighlight, SceneRoad } from '../types';
+const road=(highway:string):SceneRoad=>({osm_id:1,node_ids:[1,2],geometry:[{lat:0,lng:0},{lat:.01,lng:0}],highway,name:'Road',lanes:2,oneway:true,maxspeed:null,turn_lanes:null,change_lanes:null,destination_lanes:null});
+const route:Route3DHighlight={provider:'osrm',segments:[{coords:[{lat:0,lng:0,alt:0},{lat:.1,lng:0,alt:0}],is_highlighted:true,color:'#fff',lane_index:null}],maneuvers:[],duration_seconds:3600,distance_meters:11100};
+describe('trip intelligence',()=>{it('classifies steep elevation as mountain',()=>expect(classifyRoadCharacter({road:road('primary'),elevationMeters:0,buildingDensity:0.05,treeDensity:.6},100,1000)).toContain('mountain'));it('scores unpaved roads lower',()=>expect(scoreRoadQuality({...road('residential'),surface:'gravel'})).toBeLessThan(70));it('summarizes journey characters',()=>{const s=summarizeTrip([{location:{lat:0,lng:0},distanceFromStartMeters:0,road:road('motorway'),trafficPressure:10,roadQuality:90,elevationMeters:0,buildingDensity:0,treeDensity:0,characters:['motorway']}],route,[]);expect(s.characters[0].character).toBe('motorway');});});

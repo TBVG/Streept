@@ -348,3 +348,46 @@ Implemented destination:lanes matching, destination-aware physical connector sel
 - Smooth telemetry interpolation and bounded extrapolation.
 - Out-of-order/teleport rejection and confidence decay.
 - Driver-facing/maneuver-aware traffic prioritization with a bounded immersive render budget.
+
+## Alpha 162 — Driver Memory & Saved Places
+- Added a local-first saved-place system with validation, deduplication, and bounded storage.
+- Destination preview can save/remove a place without an account.
+- Home surface exposes saved places alongside recent destinations for one-tap trip planning.
+- This creates the foundation for persistent driver memory: route annotations, preferred approaches, parking memories, and learned road context can attach to places without making navigation dependent on an account.
+
+## Alpha 162 — Driver Memory & Saved Places
+- Local-first saved places with coordinate validation, deduplication, and bounded storage.
+- Destination preview can save/remove a place without an account.
+- Home surface exposes saved places alongside recent destinations for one-tap trip planning.
+- Foundation for persistent driver memory: route annotations, preferred approaches, parking memories, and learned road context.
+
+
+## Alpha 166 — Spatial Intelligence Cloud Loop
+- Added a privacy-conscious PostGIS-backed `spatial_observations` ledger for coarse maneuver, hazard, and lane-misalignment outcomes.
+- Added idempotent batch ingestion (`POST /api/spatial-observations`) with strict validation, 50-observation batches, and no raw GPS/account/photo storage.
+- Added `GET /api/road-intelligence` aggregation for per-OSM-way community evidence, miss/lane/hazard rates, score, and confidence over a bounded 30-day window.
+- Added local-first frontend sync: observations remain useful offline, then upload opportunistically without blocking navigation; retries are safe because observation IDs are unique.
+- Added the client API contract for querying cloud road intelligence so future route decisions can combine local execution evidence with community evidence.
+
+## Alpha 167 — Community Road Intelligence Overlay
+- Added batched PostGIS road-intelligence retrieval for up to 128 route ways.
+- Added confidence-weighted local/community evidence fusion.
+- Navigation prefetches route-wide community intelligence when scene way identities are available.
+- Community intelligence is advisory and never blocks local navigation, GPS, or rerouting.
+- Added deterministic fusion/index tests.
+
+
+## Alpha 174 — Predictive Spatial Memory
+- Added deterministic temporal spatial memory over coarse maneuver, hazard, and lane observations.
+- Added community hourly/weekday intelligence buckets from PostGIS.
+- Added confidence-bounded predictive difficulty and trend signals.
+- Integrated predictive memory into navigation guidance without bypassing hard safety rules.
+- Added route-wide predictive memory snapshot and explainable reasons.
+
+## Alpha 175 — Spatial Intelligence Release Candidate
+- Route intelligence graph connecting roads, maneuvers, and junction decisions across the whole trip.
+- Predictive spatial intelligence surfaced in the driver cockpit with confidence-bounded explanations.
+- Route planning falls back to a bounded IndexedDB route cache when the network is unavailable.
+- Route previews expose learned-difficulty signals without hiding the provider's valid-route constraints.
+- Added a bounded 90-day spatial observation retention function and timestamp index for production growth.
+- Renderer-facing intelligence now has a single presentation contract for clear/watch/prepare/high-attention states.

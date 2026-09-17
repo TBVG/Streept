@@ -25,6 +25,7 @@ cat > "$TMP_CONFIG" <<JSON
     "allowImportingTsExtensions": true
   },
   "include": [
+    "$ROOT_DIR/frontend/src/vite-env.d.ts",
     "$ROOT_DIR/frontend/src/navigation/**/*.ts",
     "$ROOT_DIR/frontend/src/types.ts",
     "$ROOT_DIR/frontend/src/utils/geo.ts"
@@ -33,6 +34,29 @@ cat > "$TMP_CONFIG" <<JSON
 }
 JSON
 
+AXIOS_SHIM="$(mktemp --suffix=.d.ts)"
+trap 'rm -f "$TMP_CONFIG" "$AXIOS_SHIM"' EXIT
+cat > "$AXIOS_SHIM" <<'DTS'
+declare module "axios" {
+  export interface AxiosRequestConfig {
+    baseURL?: string; timeout?: number; headers?: Record<string, string>; [key: string]: unknown;
+  }
+  export interface AxiosResponse<T = any> { data: T; status: number; statusText: string; headers?: Record<string, string>; config: AxiosRequestConfig; }
+  export interface AxiosInstance {
+    get<T = any>(url: string, config?: AxiosRequestConfig): Promise<AxiosResponse<T>>;
+    post<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<AxiosResponse<T>>;
+    interceptors: { request: { use(onFulfilled: (config: AxiosRequestConfig) => AxiosRequestConfig): unknown } };
+  }
+  interface AxiosStatic extends AxiosInstance { create(config?: AxiosRequestConfig): AxiosInstance; }
+  const axios: AxiosStatic;
+  export default axios;
+}
+DTS
+python3 - "$TMP_CONFIG" "$AXIOS_SHIM" <<'PY'
+import json, sys
+p=sys.argv[1]; shim=sys.argv[2]
+data=json.load(open(p)); data["include"].append(shim); open(p,"w").write(json.dumps(data))
+PY
 echo '== STREEPT NAVIGATION CORE TYPECHECK =='
 "$TSC_BIN" -p "$TMP_CONFIG" --pretty false
 echo 'Navigation core typecheck PASSED.'

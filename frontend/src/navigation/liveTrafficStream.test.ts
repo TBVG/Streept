@@ -55,5 +55,21 @@ describe('live traffic stream', () => {
     stream.replace([report('b', '2026-09-05T16:01:00.000Z')], Date.parse('2026-09-05T16:01:10.000Z'));
     expect(stream.snapshot(Date.parse('2026-09-05T16:02:10.000Z')).reports).toHaveLength(0);
   });
+  it('does not resurrect a report from an older REST snapshot after websocket removal', () => {
+    const stream = new LiveTrafficStream();
+    stream.replace([report('a', '2026-09-05T16:00:00.000Z')], Date.parse('2026-09-05T16:00:01.000Z'));
+    stream.ingest({ type: 'report_removed', id: 'a', location: report('a', '2026-09-05T16:00:00.000Z').location }, Date.parse('2026-09-05T16:00:02.000Z'));
+    stream.replace([report('a', '2026-09-05T16:00:01.500Z')], Date.parse('2026-09-05T16:00:03.000Z'));
+    expect(stream.snapshot().reports).toHaveLength(0);
+  });
+
+  it('does not resurrect a vehicle from an older REST snapshot after websocket removal', () => {
+    const stream = new LiveTrafficStream();
+    stream.replaceVehicles([vehicle('v1', '2026-09-05T16:00:00.000Z')], Date.parse('2026-09-05T16:00:01.000Z'));
+    stream.ingest({ type: 'traffic_vehicle_removed', id: 'v1', location: vehicle('v1', '2026-09-05T16:00:00.000Z').location }, Date.parse('2026-09-05T16:00:02.000Z'));
+    stream.replaceVehicles([vehicle('v1', '2026-09-05T16:00:01.500Z')], Date.parse('2026-09-05T16:00:03.000Z'));
+    expect(stream.snapshot().vehicles).toHaveLength(0);
+  });
+
 });
 

@@ -1,9 +1,11 @@
 use std::env;
+use uuid::Uuid;
 
 pub struct Config {
     pub database_url: String,
     pub jwt_secret: String,
     pub osrm_url: String,
+    pub routing_fallback_url: Option<String>,
     pub traffic_refresh_seconds: u64,
     pub cors_origin: String,
     pub route_cache_ttl_seconds: u64,
@@ -15,11 +17,19 @@ impl Config {
         Ok(Config {
             database_url: env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost/navigation_app".to_string()),
+            // Never ship a known JWT signing secret. If one is not supplied,
+            // generate a per-process secret; this keeps local development keyless
+            // while making token forgery impossible from a published default.
+            // Operators should set JWT_SECRET in any deployment that needs
+            // sessions to survive a backend restart.
             jwt_secret: env::var("JWT_SECRET")
-                .unwrap_or_else(|_| "dev-secret-key-change-in-production".to_string()),
+                .ok()
+                .filter(|value| value.len() >= 32)
+                .unwrap_or_else(|| Uuid::new_v4().to_string() + &Uuid::new_v4().to_string()),
             osrm_url: env::var("OSRM_URL")
                 .or_else(|_| env::var("ROUTING_URL"))
                 .unwrap_or_else(|_| "https://router.project-osrm.org".to_string()),
+            routing_fallback_url: env::var("ROUTING_FALLBACK_URL").ok().filter(|v| !v.trim().is_empty()),
             traffic_refresh_seconds: env::var("TRAFFIC_REFRESH_SECONDS")
                 .ok().and_then(|v| v.parse().ok()).unwrap_or(30),
             cors_origin: env::var("CORS_ORIGIN")
@@ -40,6 +50,7 @@ impl Config {
             database_url: String::new(),
             jwt_secret: "test-secret-do-not-use-in-production".to_string(),
             osrm_url: "http://localhost:5000".to_string(),
+            routing_fallback_url: None,
             traffic_refresh_seconds: 30,
             cors_origin: "http://localhost:3000".to_string(),
             route_cache_ttl_seconds: 1,

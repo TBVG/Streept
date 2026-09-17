@@ -7,12 +7,18 @@ import { Location, Route3DHighlight, ParkingLot, ParkedCar, Report, Billboard, M
 import { haversineDistanceMeters, projectOntoPolyline, bearingDegrees, signedLateralOffset } from '../utils/geo';
 import { Theme } from '../hooks/useTheme';
 import { rankRoutesWithRisk, routeRiskSummary } from '../navigation/routeQuality';
+import { buildRouteDecisionProfiles, rankRoutesBySpatialIntelligence, RouteDecisionProfile } from '../navigation/routeDecisionIntelligence';
+import { buildRouteIntelligenceGraph } from '../navigation/routeIntelligenceGraph';
+import { presentNavigationIntelligence } from '../navigation/intelligencePresentation';
+import { getRoadIntelligenceBatch } from '../navigation/spatialIntelligenceApi';
 import { buildNavigationRouteIndex, deriveNavigationHealth, estimateNavigationEta, getNavigationProgress, smoothLocation } from '../navigation/navigationCore';
 import { estimateDeadReckonedLocation, isGpsContinuityGap, continuityAccuracyMeters } from '../navigation/navigationContinuity';
 import { speakNavigationPrompt } from '../navigation/voiceGuidance';
-import { decideManeuverExperience } from '../navigation/navigationExperience';
+import { buildSpatialNavigationPlan } from '../navigation/spatialNavigationEngine';
 import { laneGuidanceLabel, estimateDriverLane } from '../navigation/laneIntelligence';
 import { buildDestinationLaneTiming } from '../navigation/destinationLaneIntelligence';
+import { stageLaneChange } from '../navigation/laneChangeStaging';
+import { planPredictiveLaneChange } from '../navigation/predictiveLanePlanning';
 import { LaneChangeExecutionState, laneChangeExecutionPrompt } from '../navigation/laneChangeExecution';
 import { buildSceneGuidancePlan } from '../navigation/sceneGuidance';
 import { assessLaneChangeReachability } from '../navigation/laneChangeReachability';
@@ -20,10 +26,19 @@ import { decideUnifiedManeuver } from '../navigation/maneuverDecision';
 import { clearNavigationSession, readNavigationSession, saveNavigationSession, touchNavigationSession } from '../navigation/navigationPersistence';
 import { NavigationPhase, NavigationEvent } from '../navigation/navigationState';
 import { NavigationEngine } from '../navigation/navigationEngine';
+import { rankParkingLots } from '../navigation/parkingIntelligence';
 import ArOverlay from './ArOverlay';
 import { recordNavigationMetric } from '../navigation/telemetry';
 import { LiveTrafficStream } from '../navigation/liveTrafficStream';
+import { isTrustedRoute } from '../navigation/routeIntegrity';
 import { toLaneOccupantObservations } from '../navigation/trafficVehicleAdapter';
+import { getSavedPlaces, isSavedPlace, savePlace, removeSavedPlace, SavedPlace } from '../navigation/savedPlaces';
+import { smartSearch, SEARCH_CATEGORY_PRESETS, SmartSearchResult } from '../navigation/smartSearch';
+import { readOfflineTrip, writeOfflineTrip } from '../navigation/offlineStore';
+import { cacheRouteMapTiles } from '../navigation/offlineMapCache';
+import { analyzeTrip, findTripStops } from '../navigation/tripIntelligenceApi';
+import { TripIntelligenceSummary } from '../navigation/tripIntelligence';
+import { rankTripAlternatives, TripRouteRank } from '../navigation/tripRouteRanking';
 import L from 'leaflet';
 
 // Vite/webpack bundle Leaflet's default marker images under hashed URLs,
@@ -91,26 +106,30 @@ const REPORT_TYPE_META: Record<string, { label: string; emoji: string }> = {
   closed_lane: { label: 'Closed Lane', emoji: '🚫' },
 };
 
-// The 2D map intentionally uses the OpenStreetMap standard raster layer.
-// This keeps the app key-free and removes the old third-party basemap key watermark.
-// OSM attribution is displayed directly on the map as required by its tile policy.
-function getLeafletTileUrl(_theme: Theme): string {
-  return 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-}
+// The 2D map uses Esri's public legacy Dark Gray Canvas raster services.
+// These endpoints do not require a Streept/CARTO API key and give us the dark
+// navigation-oriented appearance without sending tile traffic to OSM's
+// volunteer-run tile servers.
+const LEAFLET_BASE_TILE_URL =
+  'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}';
+const LEAFLET_REFERENCE_TILE_URL =
+  'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}';
 
 function getLeafletAttribution(): string {
-  return '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors';
+  return [
+    '<a href="https://www.esri.com/" target="_blank" rel="noreferrer">Esri</a>',
+    'HERE',
+    '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap contributors</a>',
+    'GIS user community',
+  ].join(' &middot; ');
 }
 
-// Route line color, mirrored from the CSS design tokens in App.css
-// (--route-amber). Kept as a literal JS constant, not read from CSS,
-// because Leaflet/MapLibre both need actual color values here — neither
-// resolves CSS custom properties in this context (SVG attributes / Style
-// Spec JSON aren't stylesheet rules). If the CSS token values change,
-// update this to match.
+// Route line color, mirrored from the CSS design tokens in App.css.
+// Kept as a literal JS constant because Leaflet path options are JS values,
+// not stylesheet declarations. Streept's navigation route is intentionally electric green.
 const ROUTE_LINE_COLOR: Record<Theme, string> = {
-  dark: '#2D7FF9',
-  light: '#1767D2',
+  dark: '#20F28A',
+  light: '#16B968',
 };
 
 const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, onToggleTheme }) => {
@@ -119,11 +138,18 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
   const [destination, setDestination] = useState<Location | null>(() => readNavigationSession()?.destination ?? null);
   const [routeOptions, setRouteOptions] = useState<Route3DHighlight[]>(() => readNavigationSession()?.routeOptions ?? []);
   const [selectedRouteIndex, setSelectedRouteIndex] = useState(() => readNavigationSession()?.selectedRouteIndex ?? 0);
+  const [routeDecisionProfiles, setRouteDecisionProfiles] = useState<RouteDecisionProfile[]>([]);
+  const [tripIntelligence, setTripIntelligence] = useState<TripIntelligenceSummary | null>(null);
+  const [tripStops, setTripStops] = useState<Awaited<ReturnType<typeof findTripStops>>>([]);
+  const [tripIntelligenceLoading, setTripIntelligenceLoading] = useState(false);
+  const [tripRouteRanks, setTripRouteRanks] = useState<TripRouteRank[]>([]);
+  const [routeCommunityIntelligence, setRouteCommunityIntelligence] = useState<Map<number, import('../navigation/spatialIntelligenceApi').RoadIntelligenceAggregate>>(new Map());
   // Kept as a plain derived value (not state) so every existing piece of
   // logic below that already reads `route` — split-view trigger, 3D
   // rendering, off-route detection — keeps working unchanged regardless
   // of how many alternates exist or which one's picked.
-  const route = routeOptions[selectedRouteIndex] ?? null;
+  const candidateRoute = routeOptions[selectedRouteIndex] ?? null;
+  const route = isTrustedRoute(candidateRoute) ? candidateRoute : null;
   const [parkingLots, setParkingLots] = useState<ParkingLot[]>([]);
   const [destinationParkingLots, setDestinationParkingLots] = useState<ParkingLot[]>([]);
   const [destinationParkingLoading, setDestinationParkingLoading] = useState(false);
@@ -154,7 +180,7 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState(() => readNavigationSession()?.destinationLabel ?? '');
-  const [searchResults, setSearchResults] = useState<GeocodeResult[]>([]);
+  const [searchResults, setSearchResults] = useState<SmartSearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState(false);
   const [showSearchResults, setShowSearchResults] = useState(false);
@@ -182,6 +208,13 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
   }
   const [navigationState, setNavigationState] = useState(() => navigationEngineRef.current!.snapshot().state);
   const [navigationEngineSnapshot, setNavigationEngineSnapshot] = useState(() => navigationEngineRef.current!.snapshot());
+  useEffect(() => {
+    const engine = navigationEngineRef.current;
+    if (!engine) return;
+    engine.setRoadIntelligence([...reports, ...liveTraffic], liveTrafficVehicles);
+    engine.setSpatialAmenities(parkingLots, billboards);
+    setNavigationEngineSnapshot(engine.snapshot());
+  }, [reports, liveTraffic, liveTrafficVehicles, parkingLots, billboards]);
   const navigationPhase = navigationState.phase;
   const navigationStarted = navigationState.sessionActive;
   const dispatchNavigation = (event: NavigationEvent) => {
@@ -199,6 +232,7 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
   const [nearbyLoading, setNearbyLoading] = useState(false);
   const [nearbyError, setNearbyError] = useState<string | null>(null);
   const [recentDestinations, setRecentDestinations] = useState<GeocodeResult[]>(() => getRecentDestinations());
+  const [savedPlaces, setSavedPlaces] = useState<SavedPlace[]>(() => getSavedPlaces());
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   const [gpsStatus, setGpsStatus] = useState<'locating' | 'good' | 'weak' | 'lost'>('locating');
   const [navigationConfidence, setNavigationConfidence] = useState(0);
@@ -295,7 +329,7 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
     // Track the user's live position (not just a one-shot fix) — the
     // split-view trigger needs to know when they're actually approaching a
     // turn, which requires continuous updates as they drive. Mount-only:
-    // unlike the MapLibre setup above, this doesn't need to restart on
+    // unlike the map renderer setup above, this doesn't need to restart on
     // theme changes.
     if (navigator.geolocation) {
       watchIdRef.current = navigator.geolocation.watchPosition(
@@ -594,34 +628,40 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
       return;
     }
 
-    const complexTargets = maneuverDistances.filter(
-      (md) => md.maneuver.is_complex && md.distanceAlong !== null
-    );
-    const target = complexTargets[maneuverIndex];
+    const spatialPlan = buildSpatialNavigationPlan({
+      route,
+      userLocation,
+      speedMps,
+      scene: sceneContext,
+      snapshot: navigationEngineSnapshot,
+    });
+    const target = spatialPlan.maneuver
+      ? maneuverDistances.find((item) => item.maneuver === spatialPlan.maneuver) ?? null
+      : null;
+    const remainingDistance = spatialPlan.distanceToManeuverMeters !== null
+      ? spatialPlan.distanceToManeuverMeters
+      : target?.distanceAlong == null
+        ? null
+        : Math.max(0, target.distanceAlong - userProjection.distanceAlongMeters);
 
-    if (!target || target.distanceAlong === null) {
-      // No more turns ahead worth a 3D look — drop back to 2D only.
+    if (!target || remainingDistance === null) {
       setSplitView(false);
       setActiveManeuver(null);
       setLaneExecution(null);
       return;
     }
 
-    const remainingDistance = target.distanceAlong - userProjection.distanceAlongMeters;
-
-    const experience = decideManeuverExperience(target.maneuver, speedMps, remainingDistance);
     const triggerDistance = Math.min(
       MAX_TRIGGER_DISTANCE_M,
-      Math.max(MIN_TRIGGER_DISTANCE_M, Math.max(speedMps * LOOKAHEAD_SECONDS, experience.triggerDistanceMeters))
+      Math.max(MIN_TRIGGER_DISTANCE_M, Math.max(speedMps * LOOKAHEAD_SECONDS, spatialPlan.experience?.triggerDistanceMeters ?? MIN_TRIGGER_DISTANCE_M))
     );
 
     if (remainingDistance <= MANEUVER_PASS_DISTANCE_M) {
-      // Reached it (or a GPS tick landed past it) — watch the next one.
       setManeuverIndex((i) => i + 1);
       setSplitView(false);
       setActiveManeuver(null);
-    } else if (remainingDistance <= triggerDistance && experience.phase !== 'standard') {
-      setSplitView(experience.phase === 'immersive');
+    } else if (remainingDistance <= triggerDistance && spatialPlan.presentation !== 'map') {
+      setSplitView(spatialPlan.presentation === 'immersive');
       setActiveManeuver(target.maneuver);
     } else {
       setSplitView(false);
@@ -676,10 +716,19 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
       return;
     }
     const currentLane = currentLaneEstimate?.laneIndex ?? null;
-    const targetLane = activeManeuver.lanes?.findIndex((lane) => lane.recommended) ?? null;
-    const timing = buildDestinationLaneTiming(currentLane, targetLane, activeManeuverRemainingM);
+    const activeManeuverIndex = maneuverDistances.findIndex((item) => item.maneuver === activeManeuver);
+    const liveStrategyStep = activeManeuverIndex >= 0
+      ? navigationEngineRef.current?.snapshot().routeLaneStrategy.steps.find((step) => step.maneuverIndex === activeManeuverIndex)
+      : null;
+    const targetLane = liveStrategyStep?.plannedLaneIndex ?? activeManeuver.lanes?.findIndex((lane) => lane.recommended) ?? null;
+    // Execute multi-lane destination requests one adjacent lane at a time.
+    // This keeps the physical trajectory believable while retaining the final
+    // destination lane as the maneuver's intent.
+    const stagedLane = stageLaneChange(currentLane, targetLane);
+    const immediateTargetLane = stagedLane.immediateTargetLaneIndex;
+    const timing = buildDestinationLaneTiming(currentLane, immediateTargetLane, activeManeuverRemainingM);
     const scenePlan = route && sceneContext
-      ? buildSceneGuidancePlan(route, activeManeuver, currentLane, currentLaneEstimate?.confidence ?? 0, sceneContext)
+      ? buildSceneGuidancePlan(route, activeManeuver, currentLane, currentLaneEstimate?.confidence ?? 0, sceneContext, immediateTargetLane)
       : null;
     const trajectory = scenePlan?.laneChangeTrajectory ?? null;
     const reachability = currentLane != null && targetLane != null && currentLane !== targetLane
@@ -691,8 +740,17 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
           currentLaneConfidence: currentLaneEstimate?.confidence ?? 0,
           reports: [...reports, ...liveTraffic],
           occupants: toLaneOccupantObservations(liveTrafficVehicles),
+          egoSpeedMps: speedMps,
+          egoHeadingDegrees: headingDeg,
         })
       : { reachable: true, confidence: 1, requiredRunwayMeters: 0, remainingMeters: activeManeuverRemainingM, reason: 'same-lane' as const, dynamics: null, trafficSafe: true, trafficConfidence: 1, trafficReason: 'same-lane' };
+    const predictivePlan = planPredictiveLaneChange({
+      currentLaneIndex: currentLane,
+      finalTargetLaneIndex: targetLane,
+      distanceToManeuverMeters: activeManeuverRemainingM,
+      reachability,
+      latestChangeMeters: timing?.latestChangeMeters ?? activeManeuverRemainingM,
+    });
     const decision = decideUnifiedManeuver({
       timing,
       reachability,
@@ -703,16 +761,16 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
       currentLaneIndex: currentLane,
       currentLaneConfidence: currentLaneEstimate?.confidence ?? 0,
       timing,
-      reachable: decision.action !== 'reroute' && decision.action !== 'uncertain' && decision.safe,
-      reachabilityConfidence: decision.confidence,
+      reachable: predictivePlan.safeToExecuteNow && decision.action !== 'reroute' && decision.action !== 'uncertain' && decision.safe,
+      reachabilityConfidence: Math.min(decision.confidence, predictivePlan.confidence),
       dynamicsConfidence: reachability.dynamics?.confidence ?? decision.confidence,
       recommendedSpeedMps: decision.recommendedSpeedMps ?? speedMps,
-      safetyReason: decision.reason,
+      safetyReason: predictivePlan.action === 'wait-for-gap' ? 'waiting-for-gap' : decision.reason,
       distanceToManeuverMeters: activeManeuverRemainingM,
       nowMs: Date.now(),
     });
     setLaneExecution(execution);
-  }, [activeManeuver, activeManeuverRemainingM, currentLaneEstimate, route, sceneContext, reports, liveTraffic, liveTrafficVehicles]);
+  }, [activeManeuver, activeManeuverRemainingM, currentLaneEstimate, maneuverDistances, route, sceneContext, reports, liveTraffic, liveTrafficVehicles]);
 
   useEffect(() => {
     if (!navigationStarted || !laneExecution || laneExecution.phase !== 'missed' || !destination || !userLocation || !isOnline) return;
@@ -972,39 +1030,49 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
         }
 
         switch (parsed.type) {
-          case 'report_created':
-          case 'report_updated':
-          case 'report_removed': {
+          case 'report_created': {
+            const report = parsed.report;
             const snapshot = liveTrafficStreamRef.current!.ingest(parsed);
             setLiveTraffic(snapshot.reports);
-            // Keep the broader report layer in sync too; this preserves the
-            // existing map/report UI while the navigation layer consumes the
-            // normalized live-traffic stream.
-            if (parsed.type === 'report_created') {
-              setReports((prev) => prev.some((r) => r.id === parsed.report.id) ? prev : [parsed.report, ...prev]);
-            } else if (parsed.type === 'report_updated') {
-              setReports((prev) => prev.map((r) => r.id === parsed.report.id ? parsed.report : r));
-            } else {
-              setReports((prev) => prev.filter((r) => r.id !== parsed.id));
-            }
+            setReports((prev) => prev.some((r) => r.id === report.id) ? prev : [report, ...prev]);
             break;
           }
-          case 'parking_updated':
+          case 'report_updated': {
+            const report = parsed.report;
+            const snapshot = liveTrafficStreamRef.current!.ingest(parsed);
+            setLiveTraffic(snapshot.reports);
+            setReports((prev) => prev.map((r) => r.id === report.id ? report : r));
+            break;
+          }
+          case 'report_removed': {
+            const id = parsed.id;
+            const snapshot = liveTrafficStreamRef.current!.ingest(parsed);
+            setLiveTraffic(snapshot.reports);
+            setReports((prev) => prev.filter((r) => r.id !== id));
+            break;
+          }
+          case 'parking_updated': {
+            const parking = parsed.parking;
             setParkingLots((prev) => {
-              const exists = prev.some((p) => p.id === parsed.parking.id);
+              const exists = prev.some((p) => p.id === parking.id);
               return exists
-                ? prev.map((p) => (p.id === parsed.parking.id ? parsed.parking : p))
-                : [...prev, parsed.parking];
+                ? prev.map((p) => (p.id === parking.id ? parking : p))
+                : [...prev, parking];
             });
             break;
-          case 'parking_car_updated':
-            setParkedCars((prev) => prev.some((c) => c.id === parsed.car.id)
-              ? prev.map((c) => c.id === parsed.car.id ? parsed.car : c)
-              : [...prev, parsed.car]);
+          }
+          case 'parking_car_updated': {
+            const car = parsed.car;
+            setParkedCars((prev) => prev.some((c) => c.id === car.id)
+              ? prev.map((c) => c.id === car.id ? car : c)
+              : [...prev, car]);
             break;
-          case 'parking_car_removed':
-            setParkedCars((prev) => prev.filter((c) => c.id !== parsed.id));
+          }
+          case 'parking_car_removed': {
+            const id = parsed.id;
+            setParkedCars((prev) => prev.filter((c) => c.id !== id));
             break;
+          }
         }
       };
 
@@ -1081,7 +1149,12 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
     const requestId = ++searchRequestIdRef.current;
     const timeoutId = window.setTimeout(async () => {
       try {
-        const results = await searchPlaces(query, userLocationRef.current || undefined);
+        const results = await smartSearch(query, {
+          userLocation: userLocationRef.current,
+          route,
+          destination,
+          maxResults: 8,
+        });
         if (requestId === searchRequestIdRef.current) {
           setSearchResults(results);
           setSearchError(false);
@@ -1100,7 +1173,7 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
     }, 400);
 
     return () => window.clearTimeout(timeoutId);
-  }, [searchQuery]);
+  }, [searchQuery, route, destination]);
 
   const showInteractionToast = (message: string) => {
     setInteractionToast(message);
@@ -1206,7 +1279,7 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
     setDestinationParkingLoading(true);
     getParking(destination)
       .then((lots) => {
-        if (!cancelled) setDestinationParkingLots(lots);
+        if (!cancelled) setDestinationParkingLots(rankParkingLots(lots, destination, 5));
       })
       .catch(() => {
         if (!cancelled) setDestinationParkingLots([]);
@@ -1372,18 +1445,51 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
       dispatchNavigation({ type: 'PLAN' });
     }
     try {
-      const routes = await getRoute(from, to);
+      let routes: Route3DHighlight[] = [];
+      try {
+        routes = await getRoute(from, to);
+      } catch (networkError) {
+        const cached = await readOfflineTrip(from, to, 7 * 24 * 60 * 60 * 1000);
+        if (cached?.routes?.length) {
+          routes = cached.routes;
+          setInteractionToast('Using your cached route — live routing is unavailable.');
+        } else {
+          throw networkError;
+        }
+      }
       // Ignore an older response that arrived after a newer route request.
       if (requestId !== routeRequestIdRef.current) return;
       if (!routes || routes.length === 0) {
         if (keepSession) dispatchNavigation({ type: 'REROUTE_FAILED' });
         setRouteOptions([]);
+        setRouteDecisionProfiles([]);
         setRouteError('No drivable route was found between these locations.');
         return;
       }
-      const rankedRoutes = rankRoutesWithRisk(routes, [...reports, ...liveTraffic]);
+      const fallbackRankedRoutes = rankRoutesWithRisk(routes, [...reports, ...liveTraffic]);
+      let rankedRoutes = fallbackRankedRoutes;
+      let rankedProfiles: RouteDecisionProfile[] = [];
+      try {
+        const wayIds = Array.from(new Set(routes.flatMap((candidate) =>
+          buildRouteDecisionProfiles([candidate], [], sceneContext, new Map())[0].wayIds
+        ))).slice(0, 128);
+        const communityItems = wayIds.length ? await getRoadIntelligenceBatch(wayIds, 30) : [];
+        if (requestId !== routeRequestIdRef.current) return;
+        const community = new Map(communityItems.map((item) => [item.way_id, item]));
+        setRouteCommunityIntelligence(community);
+        const profiles = buildRouteDecisionProfiles(routes, [...reports, ...liveTraffic], sceneContext, community);
+        const order = rankRoutesBySpatialIntelligence(profiles);
+        rankedRoutes = order.map((index) => routes[index]);
+        rankedProfiles = order.map((index) => profiles[index]);
+      } catch {
+        // Route selection remains fully functional when community intelligence is unavailable.
+        setRouteCommunityIntelligence(new Map());
+      }
       setRouteOptions(rankedRoutes);
+      setRouteDecisionProfiles(rankedProfiles.length ? rankedProfiles : rankedRoutes.map((candidate) => buildRouteDecisionProfiles([candidate], [...reports, ...liveTraffic], sceneContext, new Map())[0]));
       setSelectedRouteIndex(0);
+      void writeOfflineTrip(from, to, rankedRoutes, {});
+      void cacheRouteMapTiles(rankedRoutes[0]?.segments.flatMap((segment) => segment.coords.map((coord) => ({ lat: coord.lat, lng: coord.lng }))) ?? []);
       setManeuverIndex(0);
       setActiveManeuver(null);
       if (keepSession) {
@@ -1398,7 +1504,7 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
     } catch (error) {
       if (requestId !== routeRequestIdRef.current) return;
       console.error('Error loading route:', error);
-      if (!keepSession) setRouteOptions([]);
+      if (!keepSession) { setRouteOptions([]); setRouteDecisionProfiles([]); setRouteCommunityIntelligence(new Map()); }
       else dispatchNavigation({ type: 'REROUTE_FAILED' });
       setRouteError(error instanceof Error ? error.message : 'We could not build this route. Check the locations and try again.');
     } finally {
@@ -1439,6 +1545,25 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
   }, [upcomingManeuver, userLocation, routePolyline]);
 
   const routeRisk = useMemo(() => routeRiskSummary(route, [...reports, ...liveTraffic]), [route, reports, liveTraffic, hazardRefreshAt]);
+  const spatialCue = useMemo(() => {
+    const spatial = navigationEngineSnapshot.spatialIntelligence;
+    const guidance = navigationEngineSnapshot.spatialGuidance;
+    if (!navigationStarted || guidance.action === 'continue') return null;
+    const road = spatial.roadName ? ` on ${spatial.roadName}` : '';
+    const distance = spatial.maneuverDistanceMeters != null ? ` · ${Math.max(0, Math.round(spatial.maneuverDistanceMeters))} m` : '';
+    switch (guidance.action) {
+      case 'slow':
+        return { icon: '↓', title: 'Slow down', detail: spatial.speedLimitKph ? `Known limit ${Math.round(spatial.speedLimitKph)} km/h${road}` : `Reduce speed${road}`, tone: 'slow' };
+      case 'high-alert':
+        return { icon: '!', title: 'Complex maneuver ahead', detail: `${spatial.maneuver.replace('-', ' ')}${distance}${road}`, tone: 'alert' };
+      case 'prepare':
+        return { icon: '→', title: 'Prepare for the next move', detail: `${spatial.maneuver.replace('-', ' ')}${distance}${road}`, tone: 'prepare' };
+      case 'uncertain':
+        return { icon: '?', title: 'Road information uncertain', detail: 'Streept is using route guidance without adding assumptions.', tone: 'uncertain' };
+      default:
+        return null;
+    }
+  }, [navigationEngineSnapshot.spatialGuidance, navigationEngineSnapshot.spatialIntelligence, navigationStarted]);
   const handleMapClick = (e: L.LeafletMouseEvent) => {
     const newDest: Location = {
       lat: e.latlng.lat,
@@ -1447,6 +1572,35 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
     setDestination(newDest);
     setShowSearchResults(false);
   };
+
+  const intelligencePresentation = useMemo(() => presentNavigationIntelligence(navigationEngineSnapshot), [navigationEngineSnapshot]);
+  useEffect(() => {
+    if (routeOptions.length < 2) { setTripRouteRanks([]); return; }
+    let cancelled = false;
+    void Promise.all(routeOptions.slice(0, 4).map(candidate => analyzeTrip(candidate, [...reports, ...liveTraffic]).catch(() => null)))
+      .then(summaries => {
+        if (cancelled) return;
+        const valid = summaries.filter((x): x is TripIntelligenceSummary => Boolean(x));
+        setTripRouteRanks(valid.length > 1 ? rankTripAlternatives(valid) : []);
+      });
+    return () => { cancelled = true; };
+  }, [routeOptions, reports, liveTraffic]);
+
+  useEffect(() => {
+    if (!route) { setTripIntelligence(null); setTripStops([]); return; }
+    let cancelled = false;
+    setTripIntelligenceLoading(true);
+    void analyzeTrip(route, [...reports, ...liveTraffic]).then(summary => {
+      if (cancelled) return;
+      setTripIntelligence(summary);
+      void findTripStops(route).then(stops => { if (!cancelled) setTripStops(stops); });
+    }).catch(() => { if (!cancelled) { setTripIntelligence(null); setTripStops([]); } })
+      .finally(() => { if (!cancelled) setTripIntelligenceLoading(false); });
+    return () => { cancelled = true; };
+  }, [route, reports, liveTraffic]);
+
+  const selectedRouteProfile = routeDecisionProfiles[selectedRouteIndex] ?? null;
+  const selectedRouteGraph = useMemo(() => route ? buildRouteIntelligenceGraph(route, selectedRouteIndex, sceneContext, routeCommunityIntelligence, selectedRouteProfile, upcomingRemainingM) : null, [route, selectedRouteIndex, sceneContext, routeCommunityIntelligence, selectedRouteProfile, upcomingRemainingM]);
 
   const navigationConnectivityLabel = !isOnline
     ? 'OFFLINE MODE'
@@ -1530,6 +1684,7 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
               <div className="nav-cockpit-signal"><strong>{navigationEta.remainingSeconds != null ? Math.max(1, Math.round(navigationEta.remainingSeconds / 60)) : '—'}</strong><span>min left</span></div>
               <div className="nav-cockpit-signal"><strong>{navigationEtaLabel}</strong><span>arrival</span></div>
               {routeRisk.count > 0 && <div className="nav-cockpit-alert"><span>!</span><div><strong>{routeRisk.count} alert{routeRisk.count === 1 ? '' : 's'}</strong><small>ahead on route</small></div></div>}
+              {intelligencePresentation.level !== 'clear' && <div className={`nav-cockpit-intelligence nav-cockpit-intelligence--${intelligencePresentation.level}`}><span>✦</span><div><strong>{intelligencePresentation.title}</strong><small>{intelligencePresentation.detail}</small></div></div>}
               {destinationParkingLots.length > 0 && <div className="nav-cockpit-parking"><span>P</span><div><strong>{destinationParkingLots[0].occupied_spaces}/{destinationParkingLots[0].total_spaces}</strong><small>parking near end</small></div></div>}
             </div>
 
@@ -1566,6 +1721,16 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
                 <b>›</b>
               </button>
             </div>
+            {savedPlaces.length > 0 && (
+              <div className="home-recent home-saved-places">
+                <div><span>SAVED PLACES</span><button type="button" onClick={() => setSavedPlaces(getSavedPlaces())}>Refresh</button></div>
+                {savedPlaces.slice(0, 4).map((place) => (
+                  <button key={place.id} type="button" onClick={() => handleSelectSearchResult(place)}>
+                    <span className="home-recent-icon">★</span><span>{place.display_name}</span><b>›</b>
+                  </button>
+                ))}
+              </div>
+            )}
             {recentDestinations.length > 0 && (
               <div className="home-recent">
                 <div><span>RECENT</span><button type="button" onClick={() => { setShowSearchResults(true); setSearchQuery(''); }}>See all</button></div>
@@ -1638,7 +1803,7 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
                   {!startLoading && !startSearchError && startResults.length === 0 && (
                     <div className="trip-search-status">No places found</div>
                   )}
-                  <div className="trip-search-attribution">Search powered by OpenStreetMap data</div>
+                  <div className="trip-search-attribution">Search powered by OpenStreetMap · Streept ranks for your trip</div>
                 </div>
               )}
             </div>
@@ -1673,18 +1838,39 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
               {searchQuery && (
                 <button type="button" className="trip-search-clear trip-search-clear--destination" onClick={() => { setSearchQuery(''); setSearchResults([]); setShowSearchResults(true); }} aria-label="Clear destination">×</button>
               )}
-              {showSearchResults && searchQuery.trim().length === 0 && recentDestinations.length > 0 && (
-                <div className="trip-search-results">
-                  <div className="trip-search-section-label">Recent</div>
-                  {recentDestinations.map((result, idx) => (
-                    <button
-                      key={idx}
-                      className="trip-search-result"
-                      onClick={() => handleSelectSearchResult(result)}
-                    >
-                      🕑 {result.display_name}
+              {showSearchResults && searchQuery.trim().length === 0 && (
+                <div className="trip-search-results trip-search-results--smart-home">
+                  <div className="trip-search-section-label">Quick search</div>
+                  <div className="smart-search-presets">
+                    {SEARCH_CATEGORY_PRESETS.map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        className="smart-search-preset"
+                        onClick={() => {
+                          setSearchQuery(route ? `${preset.query} on my route` : preset.query);
+                          setShowSearchResults(true);
+                        }}
+                      >
+                        <span>{preset.icon}</span>{preset.label}
+                      </button>
+                    ))}
+                  </div>
+                  {route && (
+                    <button type="button" className="smart-search-route-action" onClick={() => { setSearchQuery('coffee on my route'); setShowSearchResults(true); }}>
+                      <span>↗</span><strong>Find something on my route</strong><small>Searches ahead instead of around you</small>
                     </button>
-                  ))}
+                  )}
+                  {recentDestinations.length > 0 && (
+                    <>
+                      <div className="trip-search-section-label smart-search-recent-label">Recent</div>
+                      {recentDestinations.slice(0, 5).map((result, idx) => (
+                        <button key={idx} className="trip-search-result" onClick={() => handleSelectSearchResult(result)}>
+                          🕑 {result.display_name}
+                        </button>
+                      ))}
+                    </>
+                  )}
                 </div>
               )}
               {showSearchResults && searchQuery.trim().length >= 3 && (
@@ -1694,10 +1880,17 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
                     searchResults.map((result, idx) => (
                       <button
                         key={idx}
-                        className="trip-search-result"
+                        className="trip-search-result trip-search-result--smart"
                         onClick={() => handleSelectSearchResult(result)}
                       >
-                        {result.display_name}
+                        <span className="smart-result-main">
+                          <strong>{result.display_name.split(',')[0]}</strong>
+                          <small>{result.category ? result.category.replace(/_/g, ' ') : (result.display_name.includes(',') ? result.display_name.slice(result.display_name.indexOf(',') + 1).trim() : 'OpenStreetMap place')}</small>
+                        </span>
+                        <span className="smart-result-meta">
+                          {result.detourLabel && <b>{result.detourLabel}</b>}
+                          {result.distanceLabel && <small>{result.distanceLabel}</small>}
+                        </span>
                       </button>
                     ))}
                   {!searchLoading && searchError && (
@@ -1753,6 +1946,24 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
               </div>
             )}
 
+            {tripIntelligence && (
+              <div className="destination-intelligence-strip trip-intelligence-strip">
+                <div><strong>{tripIntelligence.difficulty >= 70 ? 'Demanding journey' : tripIntelligence.difficulty >= 45 ? 'Mixed driving' : 'Generally easy drive'}</strong><small>Road quality {tripIntelligence.roadQuality}/100 · traffic pressure {tripIntelligence.trafficPressure}/100</small></div>
+                <div><strong>{tripIntelligence.characters.slice(0,3).map(x => `${x.character} ${x.percent}%`).join(' · ')}</strong><small>{tripIntelligence.chapters.length} journey chapters · {tripIntelligence.dataCoverage}% data coverage</small></div>
+                {tripIntelligence.maxGradePercent >= 5 && <div><strong>Steep terrain ahead</strong><small>Maximum sampled grade {tripIntelligence.maxGradePercent}% · +{tripIntelligence.elevationGainMeters} m climb</small></div>}
+              </div>
+            )}
+            {tripIntelligenceLoading && <div className="destination-intelligence-strip"><div><strong>Analyzing the journey…</strong><small>Road character, traffic, quality and terrain</small></div></div>}
+            {tripStops.length > 0 && (
+              <div className="trip-stop-hints"><strong>Useful stops along the journey</strong>{tripStops.slice(0,4).map(stop => <span key={`${stop.category}-${stop.location.lat}-${stop.location.lng}`}>{stop.category}: {stop.name.split(',')[0]}</span>)}</div>
+            )}
+            {selectedRouteGraph && (selectedRouteGraph.difficultNodes > 0 || selectedRouteGraph.highAttentionNodes > 0) && (
+              <div className="destination-intelligence-strip">
+                <span>✦</span>
+                <div><strong>{selectedRouteGraph.highAttentionNodes > 0 ? `${selectedRouteGraph.highAttentionNodes} high-attention point${selectedRouteGraph.highAttentionNodes === 1 ? '' : 's'}` : `${selectedRouteGraph.difficultNodes} learned difficulty point${selectedRouteGraph.difficultNodes === 1 ? '' : 's'}`}</strong><small>Streept will stage guidance before these decisions.</small></div>
+              </div>
+            )}
+
             {routeOptions.length > 1 && (
               <div className="destination-routes">
                 <div className="destination-section-label">ROUTES</div>
@@ -1762,13 +1973,30 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
                   return (
                     <button key={idx} type="button" className={`destination-route-option ${idx === selectedRouteIndex ? 'is-selected' : ''}`} onClick={() => { setSelectedRouteIndex(idx); showInteractionToast(idx === 0 ? 'Recommended route selected' : `Alternative route ${idx + 1} selected`); }}>
                       <span className="destination-route-dot" />
-                      <span><strong>{mins != null ? `${mins} min` : `Route ${idx + 1}`}</strong><small>{km ? `${km} km` : 'Alternative route'}{idx === 0 ? ' · Best balance' : ''}</small></span>
+                      <span><strong>{mins != null ? `${mins} min` : `Route ${idx + 1}`}</strong><small>{km ? `${km} km` : 'Alternative route'}{idx === 0 ? ' · Best balance' : ''}{routeDecisionProfiles[idx]?.difficultRoads ? ` · ${routeDecisionProfiles[idx].difficultRoads} learned difficulty` : ''}{tripRouteRanks.find(r => r.routeIndex === idx)?.reasons.slice(0, 2).map(reason => ` · ${reason}`).join('') ?? ''}</small></span>
                       <b>{idx === selectedRouteIndex ? '✓' : '›'}</b>
                     </button>
                   );
                 })}
               </div>
             )}
+
+            <div className="destination-place-actions">
+              <button type="button" onClick={() => {
+                if (!destination) return;
+                const already = isSavedPlace(destination);
+                if (already) { setInteractionToast('Already saved to your places'); return; }
+                savePlace({ display_name: searchQuery || 'Saved place', location: destination });
+                setSavedPlaces(getSavedPlaces());
+                setInteractionToast('Saved to your places');
+              }}>{destination && isSavedPlace(destination) ? '★ Saved place' : '☆ Save place'}</button>
+              {destination && isSavedPlace(destination) && <button type="button" onClick={() => {
+                const match = getSavedPlaces().find(p => Math.abs(p.location.lat - destination.lat) < 1e-5 && Math.abs(p.location.lng - destination.lng) < 1e-5);
+                if (match) removeSavedPlace(match.id);
+                setSavedPlaces(getSavedPlaces());
+                setInteractionToast('Removed from saved places');
+              }}>Remove</button>}
+            </div>
 
             <div className="destination-alert-strip">
               <span className="destination-alert-icon">{routeRisk.count > 0 ? '!' : '✓'}</span>
@@ -1903,7 +2131,18 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
           zoom={13}
           style={{ height: '100%', width: '100%' }}
         >
-          <TileLayer url={getLeafletTileUrl(theme)} attribution={getLeafletAttribution()} />
+          <TileLayer
+            url={LEAFLET_BASE_TILE_URL}
+            attribution={getLeafletAttribution()}
+            maxZoom={16}
+          />
+          <TileLayer
+            url={LEAFLET_REFERENCE_TILE_URL}
+            attribution=""
+            maxZoom={16}
+            zIndex={400}
+            opacity={0.96}
+          />
           {userLocation && (
             <Marker
               position={[userLocation.lat, userLocation.lng]}
@@ -1934,8 +2173,8 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
           {route &&
             route.segments.map((segment, idx) => {
               const positions = segment.coords.map((c) => [c.lat, c.lng] as [number, number]);
-              // Dark casing underneath + bright amber fill on top — the
-              // standard nav-app route treatment, needed for legibility
+              // Dark casing underneath + bright electric-green fill on top — the
+              // reference-inspired route treatment, needed for legibility
               // against any basemap (especially satellite imagery, whose
               // colors are unpredictable). Casing color is fixed regardless
               // of app theme since it's about contrast with the *map*, not
@@ -2217,6 +2456,15 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
             >
               I've left
             </button>
+          </div>
+        )}
+        {spatialCue && (
+          <div className={`spatial-cue spatial-cue--${spatialCue.tone}`} role="status" aria-live="polite">
+            <span className="spatial-cue-icon" aria-hidden="true">{spatialCue.icon}</span>
+            <div className="spatial-cue-copy">
+              <strong>{spatialCue.title}</strong>
+              <span>{spatialCue.detail}</span>
+            </div>
           </div>
         )}
         <div className="navigation-instructions">

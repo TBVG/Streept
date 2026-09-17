@@ -155,6 +155,56 @@ pub struct BillboardPurchaseError {
     pub message: String,
 }
 
+// Spatial Intelligence Models
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpatialObservationInput {
+    pub id: String,
+    pub at: DateTime<Utc>,
+    pub observation_type: String,
+    pub route_generation: u64,
+    pub maneuver_key: Option<String>,
+    pub way_id: Option<i64>,
+    pub maneuver: String,
+    pub lane_alignment: String,
+    pub confidence: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SpatialObservationBatchRequest {
+    pub observations: Vec<SpatialObservationInput>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SpatialObservationBatchResponse {
+    pub accepted: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RoadIntelligenceAggregate {
+    pub way_id: i64,
+    pub observations: i64,
+    pub completed: i64,
+    pub missed: i64,
+    pub lane_misalignments: i64,
+    pub hazards: i64,
+    pub miss_rate: f64,
+    pub lane_misalignment_rate: f64,
+    pub hazard_rate: f64,
+    pub score: f64,
+    pub confidence: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RoadIntelligenceTemporalBucket {
+    pub way_id: i64,
+    pub weekday: i32,
+    pub hour: i32,
+    pub observations: i64,
+    pub score: f64,
+    pub confidence: f64,
+}
+
+
 // Route Models
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RouteOptions {
@@ -167,6 +217,8 @@ pub struct RouteOptions {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Route3DHighlight {
+    /// Only real OSRM geometry is eligible for navigation.
+    pub provider: Option<String>,
     pub segments: Vec<RouteSegment>,
     /// Upcoming turns/junctions worth showing in the 3D pane. This is the
     /// list the frontend watches proximity against to decide when to flip
@@ -175,8 +227,7 @@ pub struct Route3DHighlight {
     pub maneuvers: Vec<Maneuver>,
     /// Total route duration, seconds. From OSRM's own estimate (traffic-
     /// unaware — it's based on road speed limits/type, not live
-    /// conditions). None for the mock-route fallback, where a fabricated
-    /// number would be actively misleading rather than just imprecise.
+    /// conditions).
     pub duration_seconds: Option<f64>,
     pub distance_meters: Option<f64>,
 }
@@ -307,6 +358,12 @@ pub struct SceneRoad {
     #[serde(default)]
     pub oneway_reverse: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub surface: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub smoothness: Option<String>,
+    #[serde(default)]
+    pub lit: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub maxspeed: Option<String>,
     pub bridge: bool,
     pub tunnel: bool,
@@ -316,6 +373,7 @@ pub struct SceneRoad {
     pub change_lanes: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_lanes: Option<Vec<String>>,
+    pub toll: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

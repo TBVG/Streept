@@ -1,4 +1,4 @@
-FROM rust:1.98-bookworm AS builder
+FROM rust:1.98.1-bookworm AS builder
 
 WORKDIR /app
 
@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency files
-COPY Cargo.toml Cargo.lock* ./
+COPY Cargo.toml ./
 
 # Copy source code
 COPY . .

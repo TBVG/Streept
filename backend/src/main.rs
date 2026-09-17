@@ -146,7 +146,7 @@ async fn metrics_check(
 async fn readiness_check(
     axum::extract::State(state): axum::extract::State<AppState>,
 ) -> Result<Json<Value>, StatusCode> {
-    sqlx::query_scalar::<_, i64>("SELECT 1")
+    sqlx::query_scalar::<_, i64>("SELECT 1::BIGINT")
         .fetch_one(state.db.pool())
         .await
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;

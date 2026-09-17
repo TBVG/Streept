@@ -264,7 +264,7 @@ pub async fn get_live_traffic(
             photo_url: row.get("photo_url"),
             reported_at,
             expires_at: row.get("expires_at"),
-            reporter_id: row.get("reporter_id"),
+            reporter_id: "anonymous".to_string(),
             confirmations,
             dismissals,
             confidence: Some((0.65 * vote_confidence + 0.35 * freshness).clamp(0.0, 1.0)),
@@ -429,12 +429,16 @@ pub async fn get_scene_context(
                         lanes: tags.get("lanes").and_then(|v| v.as_str()).and_then(|v| v.parse::<u32>().ok()),
                         oneway: matches!(tags.get("oneway").and_then(|v| v.as_str()), Some("yes" | "true" | "1")),
                         oneway_reverse: matches!(tags.get("oneway").and_then(|v| v.as_str()), Some("-1")),
+                        surface: tags.get("surface").and_then(|v| v.as_str()).map(str::to_string),
+                        smoothness: tags.get("smoothness").and_then(|v| v.as_str()).map(str::to_string),
+                        lit: matches!(tags.get("lit").and_then(|v| v.as_str()), Some("yes" | "true" | "1")),
                         maxspeed: tags.get("maxspeed").and_then(|v| v.as_str()).map(str::to_string),
                         bridge: matches!(tags.get("bridge").and_then(|v| v.as_str()), Some("yes" | "true" | "1")),
                         tunnel: matches!(tags.get("tunnel").and_then(|v| v.as_str()), Some("yes" | "true" | "1")),
                         turn_lanes: parse_lane_tag(tags, "turn:lanes"),
                         change_lanes: parse_lane_tag(tags, "change:lanes"),
                         destination_lanes: parse_lane_tag(tags, "destination:lanes"),
+                        toll: matches!(tags.get("toll").and_then(|v| v.as_str()), Some("yes" | "true" | "1")),
                     });
                 }
             }
@@ -563,8 +567,14 @@ pub async fn get_parking(
         }))));
     }
 
-    let lat: f64 = coords[0].parse().map_err(|_| StatusCode::BAD_REQUEST)?;
-    let lng: f64 = coords[1].parse().map_err(|_| StatusCode::BAD_REQUEST)?;
+    let lat: f64 = coords[0].trim().parse().map_err(|_| StatusCode::BAD_REQUEST)?;
+    let lng: f64 = coords[1].trim().parse().map_err(|_| StatusCode::BAD_REQUEST)?;
+    if !valid_location(Location { lat, lng }) {
+        return Ok(Json(ApiResponse::error(json!({
+            "error": "invalid_destination",
+            "message": "Destination coordinates are outside the valid geographic range."
+        }))));
+    }
 
     let query = r#"
         SELECT
@@ -616,6 +626,12 @@ pub async fn get_parked_cars(
     State(state): State<AppState>,
     Query(params): Query<ParkingNearbyQuery>,
 ) -> Result<Json<ApiResponse<Vec<ParkedCar>>>, StatusCode> {
+    if !valid_location(Location { lat: params.lat, lng: params.lng }) {
+        return Ok(Json(ApiResponse::error(json!({
+            "error": "invalid_coordinates",
+            "message": "lat/lng must be valid geographic coordinates"
+        }))));
+    }
     let radius = params.radius.unwrap_or(1200.0).clamp(50.0, 2500.0);
     let rows = sqlx::query(
         r#"
@@ -693,6 +709,12 @@ pub async fn checkin_parking(
     auth_user: AuthUser,
     Json(req): Json<ParkingCheckinRequest>,
 ) -> Result<Json<ApiResponse<ParkingLot>>, StatusCode> {
+    if req.location.is_some_and(|location| !valid_location(location)) {
+        return Ok(Json(ApiResponse::error(json!({
+            "error": "invalid_coordinates",
+            "message": "Parking location is outside the valid geographic range."
+        }))));
+    }
     let mut tx = state.db.pool().begin().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // A person can only actually be in one place at a time. If they had a
@@ -798,6 +820,12 @@ pub async fn parking_heartbeat(
     auth_user: AuthUser,
     Json(req): Json<ParkingHeartbeatRequest>,
 ) -> Result<Json<ApiResponse<()>>, StatusCode> {
+    if req.location.is_some_and(|location| !valid_location(location)) {
+        return Ok(Json(ApiResponse::error(json!({
+            "error": "invalid_coordinates",
+            "message": "Parking location is outside the valid geographic range."
+        }))));
+    }
     let result = sqlx::query("UPDATE parking_occupancy SET last_seen_at = NOW(), parked_location = CASE WHEN $2::double precision IS NULL OR $3::double precision IS NULL THEN parked_location ELSE ST_SetSRID(ST_MakePoint($3, $2), 4326)::geography END WHERE user_id = $1")
         .bind(&auth_user.id)
         .bind(req.location.map(|loc| loc.lat))
@@ -915,10 +943,253 @@ fn default_radius() -> f64 {
     1000.0 // Default 1km radius
 }
 
+pub async fn ingest_spatial_observations(
+    State(state): State<AppState>,
+    Json(req): Json<SpatialObservationBatchRequest>,
+) -> Result<Json<ApiResponse<SpatialObservationBatchResponse>>, StatusCode> {
+    const MAX_BATCH: usize = 50;
+    const ALLOWED_TYPES: [&str; 4] = [
+        "maneuver_completed", "maneuver_missed", "hazard_observed", "lane_misalignment",
+    ];
+    const ALLOWED_ALIGNMENT: [&str; 3] = ["aligned", "misaligned", "unknown"];
+
+    if req.observations.is_empty() {
+        return Ok(Json(ApiResponse::success(SpatialObservationBatchResponse { accepted: 0 })));
+    }
+    if req.observations.len() > MAX_BATCH {
+        return Ok(Json(ApiResponse::error(json!({
+            "error": "batch_too_large",
+            "message": "A maximum of 50 observations may be uploaded at once."
+        }))));
+    }
+
+    let mut tx = state.db.pool().begin().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut accepted = 0usize;
+    for observation in req.observations {
+        if observation.id.trim().is_empty() || observation.id.len() > 255
+            || !ALLOWED_TYPES.contains(&observation.observation_type.as_str())
+            || !ALLOWED_ALIGNMENT.contains(&observation.lane_alignment.as_str())
+            || observation.maneuver.len() > 120
+            || observation.maneuver_key.as_ref().is_some_and(|v| v.len() > 255)
+            || !observation.confidence.is_finite()
+            || !(0.0..=1.0).contains(&observation.confidence)
+            || observation.at > Utc::now() + Duration::minutes(10)
+            || observation.at < Utc::now() - Duration::days(30)
+        {
+            return Ok(Json(ApiResponse::error(json!({
+                "error": "invalid_observation",
+                "message": "Observation contains invalid or unsafe fields."
+            }))));
+        }
+
+        let result = sqlx::query(
+            r#"INSERT INTO spatial_observations
+               (id, observed_at, observation_type, route_generation, maneuver_key, way_id, maneuver, lane_alignment, confidence)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+               ON CONFLICT (id) DO NOTHING"#,
+        )
+        .bind(observation.id)
+        .bind(observation.at)
+        .bind(observation.observation_type)
+        .bind(i64::try_from(observation.route_generation).unwrap_or(i64::MAX))
+        .bind(observation.maneuver_key)
+        .bind(observation.way_id)
+        .bind(observation.maneuver)
+        .bind(observation.lane_alignment)
+        .bind(observation.confidence)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        accepted += result.rows_affected() as usize;
+    }
+    tx.commit().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(ApiResponse::success(SpatialObservationBatchResponse { accepted })))
+}
+
+#[derive(Deserialize)]
+pub struct RoadIntelligenceBatchQuery {
+    pub way_ids: String,
+    #[serde(default = "default_intelligence_days")]
+    pub days: i64,
+}
+
+pub async fn get_road_intelligence_batch(
+    State(state): State<AppState>,
+    Query(params): Query<RoadIntelligenceBatchQuery>,
+) -> Result<Json<ApiResponse<Vec<RoadIntelligenceAggregate>>>, StatusCode> {
+    let days = params.days.clamp(1, 30);
+    let way_ids: Vec<i64> = params.way_ids.split(',')
+        .filter_map(|v| v.trim().parse::<i64>().ok())
+        .filter(|v| *v > 0)
+        .take(128)
+        .collect();
+    if way_ids.is_empty() {
+        return Ok(Json(ApiResponse::success(Vec::new())));
+    }
+    let rows = sqlx::query(
+        r#"SELECT way_id,
+            COUNT(*)::bigint AS observations,
+            COUNT(*) FILTER (WHERE observation_type = 'maneuver_completed')::bigint AS completed,
+            COUNT(*) FILTER (WHERE observation_type = 'maneuver_missed')::bigint AS missed,
+            COUNT(*) FILTER (WHERE observation_type = 'lane_misalignment')::bigint AS lane_misalignments,
+            COUNT(*) FILTER (WHERE observation_type = 'hazard_observed')::bigint AS hazards,
+            COALESCE(AVG(confidence), 0.0)::double precision AS avg_confidence
+           FROM spatial_observations
+           WHERE way_id = ANY($1) AND observed_at >= NOW() - ($2 * INTERVAL '1 day')
+           GROUP BY way_id"#
+    )
+    .bind(&way_ids)
+    .bind(days)
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let result = rows.into_iter().map(|row| {
+        let way_id: i64 = row.get("way_id");
+        let observations: i64 = row.try_get("observations").unwrap_or(0);
+        let completed: i64 = row.try_get("completed").unwrap_or(0);
+        let missed: i64 = row.try_get("missed").unwrap_or(0);
+        let lane_misalignments: i64 = row.try_get("lane_misalignments").unwrap_or(0);
+        let hazards: i64 = row.try_get("hazards").unwrap_or(0);
+        let avg_confidence: f64 = row.try_get::<f64, _>("avg_confidence").unwrap_or(0.0).clamp(0.0_f64, 1.0_f64);
+        let decision_count = completed + missed;
+        let miss_rate = missed as f64 / decision_count.max(1) as f64;
+        let lane_rate = lane_misalignments as f64 / observations.max(1) as f64;
+        let hazard_rate = hazards as f64 / observations.max(1) as f64;
+        let score = (100.0 * (0.55 * miss_rate + 0.25 * lane_rate + 0.20 * hazard_rate)).round();
+        let confidence = ((observations as f64 / 20.0).min(1.0) * avg_confidence).clamp(0.0, 1.0);
+        RoadIntelligenceAggregate { way_id, observations, completed, missed, lane_misalignments, hazards, miss_rate, lane_misalignment_rate: lane_rate, hazard_rate, score, confidence }
+    }).collect();
+    Ok(Json(ApiResponse::success(result)))
+}
+
+#[derive(Deserialize)]
+pub struct RoadIntelligenceQuery {
+    pub way_id: i64,
+    #[serde(default = "default_intelligence_days")]
+    pub days: i64,
+}
+
+fn default_intelligence_days() -> i64 { 30 }
+
+#[derive(Deserialize)]
+pub struct RoadIntelligenceTemporalQuery {
+    pub way_ids: String,
+    #[serde(default = "default_intelligence_days")]
+    pub days: i64,
+}
+
+pub async fn get_road_intelligence_temporal(
+    State(state): State<AppState>,
+    Query(params): Query<RoadIntelligenceTemporalQuery>,
+) -> Result<Json<ApiResponse<Vec<RoadIntelligenceTemporalBucket>>>, StatusCode> {
+    let days = params.days.clamp(1, 30);
+    let way_ids: Vec<i64> = params.way_ids.split(',')
+        .filter_map(|v| v.trim().parse::<i64>().ok())
+        .filter(|v| *v > 0)
+        .take(128)
+        .collect();
+    if way_ids.is_empty() {
+        return Ok(Json(ApiResponse::success(Vec::new())));
+    }
+    let rows = sqlx::query(
+        r#"SELECT way_id,
+            EXTRACT(DOW FROM observed_at)::int AS weekday,
+            EXTRACT(HOUR FROM observed_at)::int AS hour,
+            COUNT(*)::bigint AS observations,
+            COUNT(*) FILTER (WHERE observation_type = 'maneuver_missed')::bigint AS missed,
+            COUNT(*) FILTER (WHERE observation_type = 'lane_misalignment')::bigint AS lane_misalignments,
+            COUNT(*) FILTER (WHERE observation_type = 'hazard_observed')::bigint AS hazards,
+            COUNT(*) FILTER (WHERE observation_type = 'maneuver_completed')::bigint AS completed,
+            COALESCE(AVG(confidence), 0.0)::double precision AS avg_confidence
+           FROM spatial_observations
+           WHERE way_id = ANY($1) AND observed_at >= NOW() - ($2 * INTERVAL '1 day')
+           GROUP BY way_id, EXTRACT(DOW FROM observed_at), EXTRACT(HOUR FROM observed_at)"#
+    )
+    .bind(&way_ids)
+    .bind(days)
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let result = rows.into_iter().map(|row| {
+        let way_id: i64 = row.get("way_id");
+        let weekday: i32 = row.try_get("weekday").unwrap_or(0);
+        let hour: i32 = row.try_get("hour").unwrap_or(0);
+        let observations: i64 = row.try_get("observations").unwrap_or(0);
+        let missed: i64 = row.try_get("missed").unwrap_or(0);
+        let completed: i64 = row.try_get("completed").unwrap_or(0);
+        let lane_misalignments: i64 = row.try_get("lane_misalignments").unwrap_or(0);
+        let hazards: i64 = row.try_get("hazards").unwrap_or(0);
+        let avg_confidence: f64 = row.try_get::<f64, _>("avg_confidence").unwrap_or(0.0).clamp(0.0_f64, 1.0_f64);
+        let decisions = (completed + missed).max(1) as f64;
+        let miss_rate = missed as f64 / decisions;
+        let lane_rate = lane_misalignments as f64 / observations.max(1) as f64;
+        let hazard_rate = hazards as f64 / observations.max(1) as f64;
+        let score = (100.0 * (0.55 * miss_rate + 0.25 * lane_rate + 0.20 * hazard_rate)).round();
+        let confidence = ((observations as f64 / 8.0).min(1.0) * avg_confidence).clamp(0.0, 1.0);
+        RoadIntelligenceTemporalBucket { way_id, weekday, hour, observations, score, confidence }
+    }).collect();
+    Ok(Json(ApiResponse::success(result)))
+}
+
+pub async fn get_road_intelligence(
+    State(state): State<AppState>,
+    Query(params): Query<RoadIntelligenceQuery>,
+) -> Result<Json<ApiResponse<RoadIntelligenceAggregate>>, StatusCode> {
+    if params.way_id <= 0 {
+        return Ok(Json(ApiResponse::error(json!({
+            "error": "invalid_way_id", "message": "way_id must be positive"
+        }))));
+    }
+    let days = params.days.clamp(1, 30);
+    let row = sqlx::query(
+        r#"SELECT
+            COUNT(*)::bigint AS observations,
+            COUNT(*) FILTER (WHERE observation_type = 'maneuver_completed')::bigint AS completed,
+            COUNT(*) FILTER (WHERE observation_type = 'maneuver_missed')::bigint AS missed,
+            COUNT(*) FILTER (WHERE observation_type = 'lane_misalignment')::bigint AS lane_misalignments,
+            COUNT(*) FILTER (WHERE observation_type = 'hazard_observed')::bigint AS hazards,
+            COALESCE(AVG(confidence), 0.0)::double precision AS avg_confidence
+           FROM spatial_observations
+           WHERE way_id = $1 AND observed_at >= NOW() - ($2 * INTERVAL '1 day')"#,
+    )
+    .bind(params.way_id)
+    .bind(days)
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let observations: i64 = row.try_get("observations").unwrap_or(0);
+    let completed: i64 = row.try_get("completed").unwrap_or(0);
+    let missed: i64 = row.try_get("missed").unwrap_or(0);
+    let lane_misalignments: i64 = row.try_get("lane_misalignments").unwrap_or(0);
+    let hazards: i64 = row.try_get("hazards").unwrap_or(0);
+    let avg_confidence: f64 = row.try_get::<f64, _>("avg_confidence").unwrap_or(0.0).clamp(0.0_f64, 1.0_f64);
+    let decision_count = completed + missed;
+    let miss_rate = missed as f64 / decision_count.max(1) as f64;
+    let lane_rate = lane_misalignments as f64 / observations.max(1) as f64;
+    let hazard_rate = hazards as f64 / observations.max(1) as f64;
+    let score = (100.0 * (0.55 * miss_rate + 0.25 * lane_rate + 0.20 * hazard_rate)).round();
+    let confidence = ((observations as f64 / 20.0).min(1.0) * avg_confidence).clamp(0.0, 1.0);
+
+    Ok(Json(ApiResponse::success(RoadIntelligenceAggregate {
+        way_id: params.way_id, observations, completed, missed, lane_misalignments, hazards,
+        miss_rate, lane_misalignment_rate: lane_rate, hazard_rate, score, confidence,
+    })))
+}
+
 pub async fn get_reports(
     State(state): State<AppState>,
     Query(params): Query<ReportsQuery>,
 ) -> Result<Json<ApiResponse<Vec<Report>>>, StatusCode> {
+    if !valid_location(Location { lat: params.lat, lng: params.lng }) {
+        return Ok(Json(ApiResponse::error(json!({
+            "error": "invalid_coordinates",
+            "message": "lat/lng must be valid geographic coordinates"
+        }))));
+    }
+    let radius = params.radius.clamp(50.0, 5000.0);
     let query = r#"
         SELECT 
             id,
@@ -945,7 +1216,7 @@ pub async fn get_reports(
     let rows = sqlx::query(query)
         .bind(params.lat)
         .bind(params.lng)
-        .bind(params.radius)
+        .bind(radius)
         .fetch_all(state.db.pool())
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -966,7 +1237,7 @@ pub async fn get_reports(
                 photo_url: row.get("photo_url"),
                 reported_at: row.get("reported_at"),
                 expires_at: row.get("expires_at"),
-                reporter_id: row.get("reporter_id"),
+                reporter_id: "anonymous".to_string(),
                 confirmations: row.get("confirmations"),
                 dismissals: row.get("dismissals"),
                 confidence: None,
@@ -982,9 +1253,38 @@ pub async fn create_report(
     auth_user: AuthUser,
     Json(req): Json<CreateReportRequest>,
 ) -> Result<Json<ApiResponse<Report>>, StatusCode> {
+    const MIN_REPORT_TTL_MINUTES: u64 = 5;
+    const MAX_REPORT_TTL_MINUTES: u64 = 24 * 60;
+    const ALLOWED_REPORT_TYPES: [&str; 6] = ["cop", "hazard", "construction", "accident", "traffic_jam", "closed_lane"];
+
+    if !valid_location(req.location) {
+        return Ok(Json(ApiResponse::error(json!({
+            "error": "invalid_coordinates",
+            "message": "Report coordinates are outside the valid geographic range."
+        }))));
+    }
+    if !ALLOWED_REPORT_TYPES.contains(&req.report_type.as_str()) {
+        return Ok(Json(ApiResponse::error(json!({
+            "error": "invalid_report_type",
+            "message": "Unsupported report type."
+        }))));
+    }
+    let expires_in = req.expires_in_minutes.unwrap_or(30);
+    if !(MIN_REPORT_TTL_MINUTES..=MAX_REPORT_TTL_MINUTES).contains(&expires_in) {
+        return Ok(Json(ApiResponse::error(json!({
+            "error": "invalid_expiry",
+            "message": "Report expiry must be between 5 minutes and 24 hours."
+        }))));
+    }
+    if req.photo_url.as_deref().is_some_and(|url| !valid_https_url(url, 2048)) {
+        return Ok(Json(ApiResponse::error(json!({
+            "error": "invalid_photo_url",
+            "message": "photo_url must be a valid https:// URL."
+        }))));
+    }
+
     let report_id = Uuid::new_v4().to_string();
     let reporter_id = auth_user.id;
-    let expires_in = req.expires_in_minutes.unwrap_or(30);
     let expires_at = Utc::now() + Duration::minutes(expires_in as i64);
 
     let location_json = json!({
@@ -1017,7 +1317,7 @@ pub async fn create_report(
         photo_url: row.get("photo_url"),
         reported_at: row.get("reported_at"),
         expires_at: row.get("expires_at"),
-        reporter_id: row.get("reporter_id"),
+        reporter_id: "anonymous".to_string(),
         confirmations: row.get("confirmations"),
         dismissals: row.get("dismissals"),
         confidence: None,
@@ -1142,7 +1442,7 @@ async fn record_report_vote(
         photo_url: row.get("photo_url"),
         reported_at: row.get("reported_at"),
         expires_at: row.get("expires_at"),
-        reporter_id: row.get("reporter_id"),
+        reporter_id: "anonymous".to_string(),
         confirmations: row.get("confirmations"),
         dismissals: row.get("dismissals"),
         confidence: None,
@@ -1208,6 +1508,13 @@ pub async fn get_billboards(
     State(state): State<AppState>,
     Query(params): Query<BillboardsQuery>,
 ) -> Result<Json<ApiResponse<Vec<Billboard>>>, StatusCode> {
+    if !valid_location(Location { lat: params.lat, lng: params.lng }) {
+        return Ok(Json(ApiResponse::error(json!({
+            "error": "invalid_coordinates",
+            "message": "lat/lng must be valid geographic coordinates"
+        }))));
+    }
+    let radius = params.radius.clamp(50.0, 5000.0);
     let query = r#"
         SELECT 
             id,
@@ -1237,7 +1544,7 @@ pub async fn get_billboards(
     let rows = sqlx::query(query)
         .bind(params.lat)
         .bind(params.lng)
-        .bind(params.radius)
+        .bind(radius)
         .fetch_all(state.db.pool())
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -1605,12 +1912,28 @@ fn parse_lat_lng(s: &str) -> Option<Location> {
     Some(Location { lat, lng })
 }
 
+fn valid_location(location: Location) -> bool {
+    location.lat.is_finite()
+        && location.lng.is_finite()
+        && location.lat.abs() <= 90.0
+        && location.lng.abs() <= 180.0
+}
+
+fn valid_https_url(value: &str, max_len: usize) -> bool {
+    let value = value.trim();
+    value.len() <= max_len
+        && value.starts_with("https://")
+        && !value.contains('\n')
+        && !value.contains('\r')
+        && value[8..].contains('.')
+}
+
 
 #[derive(Deserialize)]
 pub struct OfflinePlanQuery { pub from: String, pub to: String }
 
 pub async fn get_offline_plan(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Query(params): Query<OfflinePlanQuery>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
     let from = parse_lat_lng(&params.from).ok_or(StatusCode::BAD_REQUEST)?;
@@ -1660,40 +1983,37 @@ pub async fn get_route(
         }
     }
 
-    let osrm_url = format!(
-        "{}/route/v1/driving/{},{};{},{}?overview=full&geometries=geojson&steps=true&alternatives=2",
-        state.config.osrm_url, from.lng, from.lat, to.lng, to.lat
+    let route_path = format!(
+        "/route/v1/driving/{},{};{},{}?overview=full&geometries=geojson&steps=true&alternatives=2",
+        from.lng, from.lat, to.lng, to.lat
     );
-
-    let mut used_fallback = false;
-    let routes = match state.http_client.get(&osrm_url).send().await {
-        Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
-            Ok(json) => match parse_osrm_response(&json) {
-                Some(parsed) => parsed,
-                None => {
-                    used_fallback = true;
-                    vec![create_mock_route(&from, &to)]
-                }
+    let providers = std::iter::once(state.config.osrm_url.trim_end_matches('/').to_string())
+        .chain(state.config.routing_fallback_url.iter().map(|url| url.trim_end_matches('/').to_string()))
+        .collect::<Vec<_>>();
+    let mut parsed_routes = None;
+    for provider in providers {
+        let url = format!("{}{}", provider, route_path);
+        match state.http_client.get(&url).send().await {
+            Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+                Ok(json) => if let Some(parsed) = parse_osrm_response(&json) {
+                    parsed_routes = Some(parsed);
+                    break;
+                } else {
+                    tracing::warn!(provider = %provider, "routing provider returned no usable route geometry");
+                },
+                Err(err) => tracing::warn!(provider = %provider, error = %err, "routing provider returned invalid JSON"),
             },
-            Err(err) => {
-                tracing::warn!(error = %err, "OSRM returned invalid JSON; using fallback route");
-                used_fallback = true;
-                vec![create_mock_route(&from, &to)]
-            }
-        },
-        Ok(resp) => {
-            tracing::warn!(status = %resp.status(), "OSRM route request failed; using fallback route");
-            used_fallback = true;
-            vec![create_mock_route(&from, &to)]
+            Ok(resp) => tracing::warn!(provider = %provider, status = %resp.status(), "routing provider request failed"),
+            Err(err) => tracing::warn!(provider = %provider, error = %err, "routing provider request failed"),
         }
-        Err(err) => {
-            tracing::warn!(error = %err, "OSRM route request failed; using fallback route");
-            used_fallback = true;
-            vec![create_mock_route(&from, &to)]
+    }
+    let routes = match parsed_routes {
+        Some(routes) => routes,
+        None => {
+            state.route_failures.fetch_add(1, Ordering::Relaxed);
+            return Err(StatusCode::BAD_GATEWAY);
         }
     };
-
-    if used_fallback { state.route_failures.fetch_add(1, Ordering::Relaxed); }
     let result = RouteOptions { routes };
     {
         let mut cache = state.route_cache.write().await;
@@ -1847,6 +2167,7 @@ fn parse_single_osrm_route(route_json: &serde_json::Value) -> Option<Route3DHigh
     }
 
     Some(Route3DHighlight {
+        provider: Some("osrm".to_string()),
         segments: vec![RouteSegment {
             coords,
             is_highlighted: true,
@@ -1857,55 +2178,5 @@ fn parse_single_osrm_route(route_json: &serde_json::Value) -> Option<Route3DHigh
         duration_seconds,
         distance_meters,
     })
-}
-
-/// Builds a mock route when OSRM isn't reachable/configured. Rather than a
-/// single straight line (which can never exercise the split-view feature),
-/// this inserts one synthetic 90-degree turn at the midpoint so the
-/// proximity-trigger logic on the frontend has something real to react to
-/// during local development. No duration/distance estimate and no lane
-/// data — fabricating either would be actively misleading rather than
-/// just imprecise, since there's no real routing engine behind this path.
-fn create_mock_route(from: &Location, to: &Location) -> Route3DHighlight {
-    let mid = Location {
-        lat: (from.lat + to.lat) / 2.0,
-        lng: from.lng, // go "north/south" first, then "east/west" — an L-shaped route
-    };
-
-    let bearing_before = bearing_degrees(from, &mid);
-
-    Route3DHighlight {
-        segments: vec![RouteSegment {
-            coords: vec![
-                RouteCoord { lat: from.lat, lng: from.lng, alt: 0.0 },
-                RouteCoord { lat: mid.lat, lng: mid.lng, alt: 0.0 },
-                RouteCoord { lat: to.lat, lng: to.lng, alt: 0.0 },
-            ],
-            is_highlighted: true,
-            color: "#0000FF".to_string(),
-            lane_index: None,
-        }],
-        maneuvers: vec![Maneuver {
-            maneuver_type: "turn".to_string(),
-            modifier: Some(if to.lng >= from.lng { "right".to_string() } else { "left".to_string() }),
-            location: mid,
-            bearing_before,
-            instruction: "Turn onto the connecting road".to_string(),
-            is_complex: true,
-            lanes: None,
-        }],
-        duration_seconds: None,
-        distance_meters: None,
-    }
-}
-
-/// Compass bearing (degrees, 0-360) from point a to point b.
-fn bearing_degrees(a: &Location, b: &Location) -> f64 {
-    let lat1 = a.lat.to_radians();
-    let lat2 = b.lat.to_radians();
-    let d_lng = (b.lng - a.lng).to_radians();
-    let y = d_lng.sin() * lat2.cos();
-    let x = lat1.cos() * lat2.sin() - lat1.sin() * lat2.cos() * d_lng.cos();
-    (y.atan2(x).to_degrees() + 360.0) % 360.0
 }
 

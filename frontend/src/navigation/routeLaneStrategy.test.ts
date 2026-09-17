@@ -47,4 +47,15 @@ describe('routeLaneStrategy', () => {
     expect(plan.totalLaneChanges).toBeGreaterThanOrEqual(2);
     expect(plan.steps.every((step) => step.stabilityScore >= 0)).toBe(true);
   });
+
+  it('keeps a stable planned lane across upcoming maneuvers when the same lane remains valid', () => {
+    const plan = buildRouteLaneStrategy([
+      maneuver([{ laneIndex: 1, recommended: true }]),
+      maneuver([{ laneIndex: 1, recommended: true }, { laneIndex: 2, recommended: true }]),
+      maneuver([{ laneIndex: 1, recommended: true }]),
+    ], 1, 0.95, 4);
+    expect(plan.steps.map((step) => step.plannedLaneIndex)).toEqual([1, 1, 1]);
+    expect(plan.totalLaneChanges).toBe(0);
+  });
+
 });

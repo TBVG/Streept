@@ -34,8 +34,10 @@ export class LiveTrafficStream {
   private readonly maxVehicles: number;
   private reports = new Map<string, Report>();
   private reportUpdatedAt = new Map<string, number>();
+  private reportRemovedAt = new Map<string, number>();
   private vehicles = new Map<string, TrafficVehicle>();
   private vehicleUpdatedAt = new Map<string, number>();
+  private vehicleRemovedAt = new Map<string, number>();
   private updatedAtMs = 0;
 
   constructor(options: LiveTrafficStreamOptions = {}) {
@@ -48,6 +50,11 @@ export class LiveTrafficStream {
   replace(reports: Report[], nowMs = Date.now()): LiveTrafficStreamSnapshot {
     for (const report of reports) {
       if (!LIVE_TRAFFIC_TYPES.has(report.type)) continue;
+      const removedAt = this.reportRemovedAt.get(report.id);
+      // A REST snapshot has no server-side deletion sequence number. After a
+      // WebSocket deletion, briefly tombstone the id so an already-in-flight
+      // REST response cannot immediately resurrect the removed object.
+      if (removedAt != null && nowMs - removedAt < this.staleAfterMs) continue;
       const previous = this.reportUpdatedAt.get(report.id) ?? -Infinity;
       // REST responses can arrive out of order. reported_at is the server's
       // event timestamp; never let an older snapshot erase a newer delta.
@@ -55,6 +62,7 @@ export class LiveTrafficStream {
       if (eventMs >= previous) {
         this.reports.set(report.id, report);
         this.reportUpdatedAt.set(report.id, eventMs);
+        this.reportRemovedAt.delete(report.id);
       }
     }
     this.updatedAtMs = nowMs;
@@ -65,10 +73,13 @@ export class LiveTrafficStream {
     for (const vehicle of vehicles) {
       if (!isUsableVehicle(vehicle)) continue;
       const eventMs = Date.parse(vehicle.observed_at) || nowMs;
+      const removedAt = this.vehicleRemovedAt.get(vehicle.id);
+      if (removedAt != null && nowMs - removedAt < this.vehicleStaleAfterMs) continue;
       const previous = this.vehicleUpdatedAt.get(vehicle.id) ?? -Infinity;
       if (eventMs >= previous) {
         this.vehicles.set(vehicle.id, vehicle);
         this.vehicleUpdatedAt.set(vehicle.id, eventMs);
+        this.vehicleRemovedAt.delete(vehicle.id);
       }
     }
     this.updatedAtMs = nowMs;
@@ -80,27 +91,37 @@ export class LiveTrafficStream {
       const report = event.report;
       if (!LIVE_TRAFFIC_TYPES.has(report.type)) return this.snapshot(nowMs);
       const eventMs = Date.parse(report.reported_at) || nowMs;
-      const previous = this.reportUpdatedAt.get(report.id) ?? -Infinity;
+      const previous = Math.max(
+        this.reportUpdatedAt.get(report.id) ?? -Infinity,
+        this.reportRemovedAt.get(report.id) ?? -Infinity,
+      );
       if (eventMs >= previous) {
         this.reports.set(report.id, report);
         this.reportUpdatedAt.set(report.id, eventMs);
+        this.reportRemovedAt.delete(report.id);
       }
     } else if (event.type === 'report_removed') {
       this.reports.delete(event.id);
       this.reportUpdatedAt.delete(event.id);
+      this.reportRemovedAt.set(event.id, nowMs);
     } else if (event.type === 'traffic_vehicle_updated') {
       const vehicle = event.vehicle;
       if (isUsableVehicle(vehicle)) {
         const eventMs = Date.parse(vehicle.observed_at) || nowMs;
-        const previous = this.vehicleUpdatedAt.get(vehicle.id) ?? -Infinity;
+        const previous = Math.max(
+          this.vehicleUpdatedAt.get(vehicle.id) ?? -Infinity,
+          this.vehicleRemovedAt.get(vehicle.id) ?? -Infinity,
+        );
         if (eventMs >= previous) {
           this.vehicles.set(vehicle.id, vehicle);
           this.vehicleUpdatedAt.set(vehicle.id, eventMs);
+          this.vehicleRemovedAt.delete(vehicle.id);
         }
       }
     } else if (event.type === 'traffic_vehicle_removed') {
       this.vehicles.delete(event.id);
       this.vehicleUpdatedAt.delete(event.id);
+      this.vehicleRemovedAt.set(event.id, nowMs);
     }
     this.updatedAtMs = nowMs;
     return this.snapshot(nowMs);
@@ -131,8 +152,10 @@ export class LiveTrafficStream {
   clear(): void {
     this.reports.clear();
     this.reportUpdatedAt.clear();
+    this.reportRemovedAt.clear();
     this.vehicles.clear();
     this.vehicleUpdatedAt.clear();
+    this.vehicleRemovedAt.clear();
     this.updatedAtMs = 0;
   }
 
@@ -150,6 +173,12 @@ export class LiveTrafficStream {
         this.vehicles.delete(id);
         this.vehicleUpdatedAt.delete(id);
       }
+    }
+    for (const [id, removedAt] of this.reportRemovedAt) {
+      if (nowMs - removedAt >= this.staleAfterMs) this.reportRemovedAt.delete(id);
+    }
+    for (const [id, removedAt] of this.vehicleRemovedAt) {
+      if (nowMs - removedAt >= this.vehicleStaleAfterMs) this.vehicleRemovedAt.delete(id);
     }
   }
 }

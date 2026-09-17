@@ -13,6 +13,7 @@ use crate::AppState;
 
 pub fn create_api_router() -> Router<AppState> {
     Router::new()
+        .layer(from_fn(rate_limit::limit_global))
         .route(
             "/auth/register",
             post(handlers::register).layer(from_fn(rate_limit::limit_register)),
@@ -27,6 +28,10 @@ pub fn create_api_router() -> Router<AppState> {
         .route("/traffic", get(handlers::get_live_traffic))
         .route("/traffic/vehicles", get(handlers::get_live_traffic_vehicles))
         .route("/traffic/vehicles/ingest", post(handlers::ingest_live_traffic_vehicles))
+        .route("/spatial-observations", post(handlers::ingest_spatial_observations))
+        .route("/road-intelligence/batch", get(handlers::get_road_intelligence_batch))
+        .route("/road-intelligence/temporal", get(handlers::get_road_intelligence_temporal))
+        .route("/road-intelligence", get(handlers::get_road_intelligence))
         .route("/offline/plan", get(handlers::get_offline_plan))
         .route("/scene-context", get(handlers::get_scene_context))
         .route("/scene-tile", get(handlers::get_scene_tile))

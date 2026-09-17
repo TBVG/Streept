@@ -1,0 +1,2 @@
+# Streept Passes 80-89
+Implemented road-event fusion, hazard confidence decay, traffic freshness quality, explicit reroute reasons, alternative-route scoring, destination approach phases, pedestrian/crossing awareness, GPS/map-match confidence, route completion, maneuver anticipation, voice cue deduplication, offline capability classification, telemetry sanitization, data quality, world-context snapshots, decision traces, and world-model coverage scoring.

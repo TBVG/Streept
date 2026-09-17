@@ -180,3 +180,10 @@ Completed: movement-aware scene bubble planning, bounded warm/handoff overlap, s
 - [x] Add deterministic pooling tests.
 
 **Next focus:** long-drive memory/GC stress validation and asynchronous scene lifecycle hardening.
+
+### Alpha 154 — Long-Drive Lifecycle & Memory Stability — COMPLETED
+- [x] Add generation-safe scene leases so late async bubbles cannot resurrect retired world state.
+- [x] Enforce bounded active-scene and estimated-memory budgets while protecting current/forward bubbles.
+- [x] Add retiring-scene grace periods for smooth handoff without indefinite residency.
+- [x] Coordinate renderer cleanup with the existing primitive pool through a renderer-neutral release helper.
+- [x] Add deterministic lifecycle tests for late requests, protected bubbles, eviction, and retirement expiry.

@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
 
-class AppErrorBoundary extends React.Component<React.PropsWithChildren, { error: Error | null }> {
+class AppErrorBoundary extends React.Component<React.PropsWithChildren<{}>, { error: Error | null }> {
   state = { error: null as Error | null };
 
   static getDerivedStateFromError(error: Error) {

@@ -18,6 +18,7 @@ export interface LaneChangeExecutionState {
   dynamicsConfidence: number;
   recommendedSpeedMps: number | null;
   safetyReason: string | null;
+  progressValidated: boolean;
 }
 
 export interface LaneChangeExecutionInput {
@@ -36,7 +37,7 @@ export interface LaneChangeExecutionInput {
 const EMPTY: LaneChangeExecutionState = {
   phase: 'idle', sourceLane: null, targetLane: null, direction: 'stay', stableLane: null,
   stableSamples: 0, startedAtMeters: null, distanceToManeuverMeters: null, deadlineMeters: null,
-  confidence: 0, missedReason: null, reachabilityConfidence: 0, dynamicsConfidence: 0, recommendedSpeedMps: null, safetyReason: null,
+  confidence: 0, missedReason: null, reachabilityConfidence: 0, dynamicsConfidence: 0, recommendedSpeedMps: null, safetyReason: null, progressValidated: true,
 };
 
 export class LaneChangeExecutionTracker {
@@ -96,9 +97,25 @@ export class LaneChangeExecutionTracker {
       this.lastTarget = target;
     }
 
+    const previousStableLane = this.state.stableLane;
+    const observedStep = input.currentLaneIndex != null && previousStableLane != null
+      ? Math.abs(input.currentLaneIndex - previousStableLane)
+      : 0;
+    // GPS/lane matching can occasionally jump across multiple lanes in one
+    // fix. Never treat that as a physically executed multi-lane transition.
+    // The vehicle must be observed progressing through adjacent lanes first.
+    const progressValidated = observedStep <= 1;
+    if (!progressValidated) {
+      this.state.progressValidated = false;
+      this.state.phase = 'uncertain';
+      this.state.missedReason = 'lane-not-confirmed';
+      this.state.confidence = Math.min(this.state.confidence, input.currentLaneConfidence * 0.6);
+      return { ...this.state };
+    }
     const sameAsStable = input.currentLaneIndex != null && input.currentLaneIndex === this.state.stableLane;
     const stableSamples = sameAsStable ? this.state.stableSamples + 1 : input.currentLaneIndex == null ? this.state.stableSamples : 1;
     this.state.stableLane = input.currentLaneIndex ?? this.state.stableLane;
+    this.state.progressValidated = progressValidated;
     this.state.stableSamples = Math.min(6, stableSamples);
     this.state.confidence = input.currentLaneConfidence;
     this.state.reachabilityConfidence = input.reachabilityConfidence ?? this.state.reachabilityConfidence;
@@ -116,7 +133,13 @@ export class LaneChangeExecutionTracker {
     }
 
     if (input.reachable === false) {
-      const dynamicUnsafe = input.safetyReason === 'insufficient-reaction-distance' || input.safetyReason === 'lateral-load-too-high' || input.safetyReason === 'speed-too-high' || input.safetyReason === 'unsafe-gap' || input.safetyReason === 'target-lane-blocked' || input.safetyReason === 'traffic-caution' || input.safetyReason === 'low-confidence';
+      const waitingForGap = input.safetyReason === 'waiting-for-gap';
+      if (waitingForGap && timing.urgency !== 'too-late' && (input.distanceToManeuverMeters ?? 0) > 20) {
+        this.state.phase = 'prepare';
+        this.state.missedReason = null;
+        return { ...this.state };
+      }
+      const dynamicUnsafe = waitingForGap || input.safetyReason === 'insufficient-reaction-distance' || input.safetyReason === 'lateral-load-too-high' || input.safetyReason === 'speed-too-high' || input.safetyReason === 'unsafe-gap' || input.safetyReason === 'target-lane-blocked' || input.safetyReason === 'traffic-caution' || input.safetyReason === 'low-confidence';
       if (dynamicUnsafe && (timing.urgency !== 'too-late' && (input.distanceToManeuverMeters ?? 0) > 20)) {
         this.state.phase = 'uncertain';
         this.state.missedReason = 'lane-not-confirmed';
@@ -155,6 +178,9 @@ export function laneChangeExecutionPrompt(state: LaneChangeExecutionState): stri
   if (state.phase === 'completed') return 'Lane change complete';
   if (state.phase === 'missed') return state.direction === 'left' ? 'Missed left lane change' : 'Missed right lane change';
   if (state.phase === 'changing') return state.direction === 'left' ? 'Change to the left lane now' : 'Change to the right lane now';
-  if (state.phase === 'prepare') return state.direction === 'left' ? 'Prepare to move to the left lane' : 'Prepare to move to the right lane';
+  if (state.phase === 'prepare') {
+    if (state.safetyReason === 'waiting-for-gap') return 'Waiting for a safe gap before changing lanes';
+    return state.direction === 'left' ? 'Prepare to move to the left lane' : 'Prepare to move to the right lane';
+  }
   return null;
 }

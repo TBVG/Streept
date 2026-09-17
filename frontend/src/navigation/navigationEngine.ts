@@ -1,4 +1,4 @@
-import { Location, Route3DHighlight } from '../types';
+import { Location, Report, Route3DHighlight, TrafficVehicle } from '../types';
 import {
   buildNavigationRouteIndex,
   deriveNavigationHealth,
@@ -23,6 +23,22 @@ import { mapLaneAcrossWays } from './laneContinuity';
 import { LaneTrackingStability, observationFromMatch } from './laneTrackingStability';
 import { MotionSensorSample, fuseMotion } from './sensorFusion';
 import { classifyExtremeNavigation, ExtremeNavigationScenario } from './extremeNavigationScenarios';
+import { deriveSpatialIntelligence, SpatialIntelligenceSnapshot } from './spatialIntelligence';
+import { decideSpatialGuidance, SpatialGuidanceDecision } from './spatialGuidanceDecision';
+import { SpatialGuidanceStabilizer } from './spatialGuidanceStability';
+import { decideDriverAction, DriverDecision } from './driverDecision';
+import { ManeuverOutcome, ManeuverOutcomeTracker } from './maneuverOutcome';
+import { SpatialObservation, SpatialObservationLedger } from './observationLedger';
+import { RoadIntelligenceScore, scoreRoadIntelligence } from './roadIntelligence';
+import { adaptSpatialGuidance } from './adaptiveGuidance';
+import { RouteLaneStrategy, buildRouteLaneStrategy } from './routeLaneStrategy';
+import { ParkingLot, Billboard } from '../types';
+import { buildSpatialWorldContext, SpatialWorldContext } from './worldContext';
+import { assessWorldContextQuality, WorldContextQuality } from './worldContextQuality';
+import { deriveSpatialPriorities, SpatialPriorityItem } from './spatialPriority';
+import { getRoadIntelligenceBatch, getRoadIntelligenceTemporal, RoadIntelligenceTemporalBucket, syncSpatialObservations } from './spatialIntelligenceApi';
+import { fuseRoadIntelligence, indexCommunityRoadIntelligence } from './communityRoadIntelligence';
+import { buildSpatialMemorySnapshot, SpatialMemorySnapshot } from './spatialMemory';
 
 export interface NavigationEngineSnapshot {
   state: NavigationState;
@@ -45,6 +61,17 @@ export interface NavigationEngineSnapshot {
   routeGeneration: number;
   extremeScenario: ExtremeNavigationScenario;
   routeReacquire: boolean;
+  spatialIntelligence: SpatialIntelligenceSnapshot;
+  spatialGuidance: SpatialGuidanceDecision;
+  driverDecision: DriverDecision;
+  maneuverOutcome: ManeuverOutcome;
+  spatialObservations: SpatialObservation[];
+  roadIntelligence: RoadIntelligenceScore;
+  routeLaneStrategy: RouteLaneStrategy;
+  worldContext: SpatialWorldContext;
+  worldContextQuality: WorldContextQuality;
+  spatialPriorities: SpatialPriorityItem[];
+  spatialMemory: SpatialMemorySnapshot;
 }
 
 export interface NavigationEngineOptions {
@@ -94,6 +121,8 @@ export class NavigationEngine {
   private headingDegrees: number | null = null;
   private motionConfidence = 0;
   private scene: SceneContext | null = null;
+  private roadReports: Report[] = [];
+  private trafficVehicles: TrafficVehicle[] = [];
   private currentWayId: number | null = null;
   private waySequence: number[] = [];
   private plannedWaySequence: number[] = [];
@@ -104,6 +133,29 @@ export class NavigationEngine {
   private routeGeneration = 0;
   private extremeScenario: ExtremeNavigationScenario = 'normal';
   private routeReacquire = false;
+  private spatialIntelligence: SpatialIntelligenceSnapshot = deriveSpatialIntelligence(null, null, null, null);
+  private spatialGuidance: SpatialGuidanceDecision = decideSpatialGuidance(this.spatialIntelligence, null);
+  private driverDecision: DriverDecision = decideDriverAction({
+    spatial: this.spatialIntelligence, guidance: this.spatialGuidance,
+    restrictionProhibited: false, restrictionConfidence: 0, routeReacquire: false,
+  });
+  private readonly spatialGuidanceStability = new SpatialGuidanceStabilizer();
+  private readonly maneuverOutcome = new ManeuverOutcomeTracker();
+  private readonly observationLedger = new SpatialObservationLedger();
+  private lastObservationSyncAt = 0;
+  private observationSyncInFlight = false;
+  private lastObservedManeuverOutcome = 'unknown';
+  private roadIntelligence: RoadIntelligenceScore = scoreRoadIntelligence([], null);
+  private routeLaneStrategy: RouteLaneStrategy = { steps: [], totalLaneChanges: 0, confidence: 0 };
+  private parkingLots: ParkingLot[] = [];
+  private billboards: Billboard[] = [];
+  private worldContext: SpatialWorldContext = buildSpatialWorldContext(this.spatialIntelligence, null, [], [], [], []);
+  private worldContextQuality: WorldContextQuality = assessWorldContextQuality(this.worldContext);
+  private spatialPriorities: SpatialPriorityItem[] = [];
+  private spatialMemory: SpatialMemorySnapshot = buildSpatialMemorySnapshot([], [], new Map(), null, Date.now(), []);
+  private communityRoadIntelligence = new Map<number, import('./spatialIntelligenceApi').RoadIntelligenceAggregate>();
+  private communityPrefetchGeneration = 0;
+  private communityTemporal: RoadIntelligenceTemporalBucket[] = [];
 
   constructor(options: NavigationEngineOptions = {}) {
     this.now = options.now ?? (() => Date.now());
@@ -130,10 +182,31 @@ export class NavigationEngine {
     this.laneTracking.reset();
     this.motionConfidence = 0;
     this.laneChangeExecution.reset();
+    this.spatialGuidanceStability.reset();
     this.routeGeneration += 1;
+    this.maneuverOutcome.reset(this.routeGeneration);
     this.extremeScenario = 'normal';
     this.routeReacquire = false;
+    this.lastObservedManeuverOutcome = 'unknown';
     this.plannedWaySequence = this.scene ? this.deriveRouteWaySequence(polyline) : [];
+    this.communityTemporal = [];
+    this.refreshSpatialIntelligence();
+    this.prefetchCommunityRoadIntelligence();
+  }
+
+  /** Feed live road intelligence into the canonical navigation context. The UI
+   * may own the socket/polling lifecycle, but the engine remains the single
+   * source for spatial decisions and never invents traffic facts. */
+  setSpatialAmenities(parkingLots: ParkingLot[] = [], billboards: Billboard[] = []): void {
+    this.parkingLots = [...parkingLots];
+    this.billboards = [...billboards];
+    this.refreshSpatialIntelligence();
+  }
+
+  setRoadIntelligence(reports: Report[] = [], trafficVehicles: TrafficVehicle[] = []): void {
+    this.roadReports = [...reports];
+    this.trafficVehicles = [...trafficVehicles];
+    this.refreshSpatialIntelligence();
   }
 
   /** Attach the current local OSM scene. The engine keeps this context so way
@@ -146,6 +219,9 @@ export class NavigationEngine {
     this.previousLaneWayId = null;
     this.laneTracking.reset();
     this.laneChangeExecution.reset();
+    this.spatialGuidanceStability.reset();
+    this.refreshSpatialIntelligence();
+    this.prefetchCommunityRoadIntelligence();
     // Scene refreshes replace the map evidence, not the navigation session.
     // Keep trusted traversed-way history so a tile refresh cannot manufacture
     // a new restriction prefix or erase the current carriageway identity.
@@ -228,6 +304,7 @@ export class NavigationEngine {
       this.matched = scenario.confidenceCap == null ? matched : { ...matched, confidence: Math.min(matched.confidence, scenario.confidenceCap) };
       this.updateSceneWayState(input.location);
       this.updateCurrentLane(input.location);
+      this.refreshSpatialIntelligence();
     } else {
       this.matched = null;
       this.currentWayId = null;
@@ -275,6 +352,7 @@ export class NavigationEngine {
       this.matched = { ...predicted, confidence: Math.min(predicted.confidence, estimate.confidence) };
       this.updateSceneWayState(estimate.location);
       this.updateCurrentLane(estimate.location);
+      this.refreshSpatialIntelligence();
     } else {
       this.matched = null;
     }
@@ -346,6 +424,17 @@ export class NavigationEngine {
       routeGeneration: this.routeGeneration,
       extremeScenario: this.extremeScenario,
       routeReacquire: this.routeReacquire,
+      spatialIntelligence: this.spatialIntelligence,
+      spatialGuidance: this.spatialGuidance,
+      driverDecision: this.driverDecision,
+      maneuverOutcome: this.maneuverOutcome.snapshot(),
+      spatialObservations: this.observationLedger.snapshot(),
+      roadIntelligence: this.roadIntelligence,
+      routeLaneStrategy: this.routeLaneStrategy,
+      worldContext: this.worldContext,
+      worldContextQuality: this.worldContextQuality,
+      spatialPriorities: [...this.spatialPriorities],
+      spatialMemory: this.spatialMemory,
     };
   }
 
@@ -432,6 +521,89 @@ export class NavigationEngine {
       if (sequence[sequence.length - 1] !== match.wayId) sequence.push(match.wayId);
     }
     return sequence;
+  }
+
+  private refreshSpatialIntelligence(): void {
+    this.routeLaneStrategy = this.route?.maneuvers?.length
+      ? buildRouteLaneStrategy(this.route.maneuvers, this.currentLane?.laneIndex ?? null, this.currentLane?.confidence ?? 0.5, 4)
+      : { steps: [], totalLaneChanges: 0, confidence: this.currentLane?.confidence ?? 0.5 };
+    this.spatialIntelligence = deriveSpatialIntelligence(
+      this.matched?.location ?? this.lastFixLocation,
+      this.route,
+      this.scene,
+      this.currentWayId,
+      this.roadReports,
+      this.trafficVehicles,
+      undefined,
+      this.currentLane?.laneIndex ?? null,
+      this.plannedWaySequence,
+    );
+    const baseGuidance = decideSpatialGuidance(this.spatialIntelligence, this.speedMps);
+    const restrictionStatus = evaluateRouteRestrictionTransitions(this.scene?.restrictions, this.waySequence);
+    const maneuverOutcome = this.maneuverOutcome.update({ spatial: this.spatialIntelligence, routeGeneration: this.routeGeneration });
+    const outcomeKey = `${maneuverOutcome.status}|${maneuverOutcome.maneuverKey ?? ''}|${maneuverOutcome.completedCount}|${maneuverOutcome.missedCount}`;
+    if (outcomeKey !== this.lastObservedManeuverOutcome) {
+      if (maneuverOutcome.status === 'completed' || maneuverOutcome.status === 'missed') {
+        this.observationLedger.recordManeuverOutcome(maneuverOutcome, this.spatialIntelligence, this.routeGeneration);
+      }
+      this.lastObservedManeuverOutcome = outcomeKey;
+    }
+    // Score after recording the latest outcome so the next guidance decision
+    // can immediately learn from the maneuver just completed or missed.
+    const localRoadIntelligence = scoreRoadIntelligence(this.observationLedger.snapshot(), this.spatialIntelligence.wayId);
+    this.roadIntelligence = fuseRoadIntelligence(localRoadIntelligence, this.spatialIntelligence.wayId != null ? this.communityRoadIntelligence.get(this.spatialIntelligence.wayId) : null);
+    this.spatialMemory = buildSpatialMemorySnapshot(
+      this.plannedWaySequence,
+      this.observationLedger.snapshot(),
+      this.communityRoadIntelligence,
+      this.spatialIntelligence.wayId,
+      this.now(),
+      this.communityTemporal,
+    );
+    // Predictive memory is advisory. It may raise attention only when its
+    // confidence is meaningful; it never bypasses hard route restrictions.
+    // Upload only coarse, already-redacted observations. Keep navigation fully
+    // local-first: a failed sync never blocks GPS, guidance, or rerouting.
+    if (!this.observationSyncInFlight && this.now() - this.lastObservationSyncAt >= 15_000) {
+      this.lastObservationSyncAt = this.now();
+      this.observationSyncInFlight = true;
+      void this.observationLedger.flushToCloud(syncSpatialObservations, 50).finally(() => {
+        this.observationSyncInFlight = false;
+      });
+    }
+
+    const routeLocations = this.getPolyline(this.route);
+    this.worldContext = buildSpatialWorldContext(this.spatialIntelligence, this.matched?.location ?? null, this.parkingLots, this.billboards, this.roadReports, this.trafficVehicles, routeLocations, this.now());
+    this.worldContextQuality = assessWorldContextQuality(this.worldContext);
+    this.spatialPriorities = deriveSpatialPriorities(this.worldContext, this.spatialIntelligence.maneuverDistanceMeters);
+    const predictiveRoadIntelligence = this.spatialMemory.current.confidence >= 0.45 && this.spatialMemory.current.predictedScore > this.roadIntelligence.score
+      ? { ...this.roadIntelligence, score: this.spatialMemory.current.predictedScore, confidence: Math.min(this.roadIntelligence.confidence + 0.08, this.spatialMemory.current.confidence) }
+      : this.roadIntelligence;
+    this.spatialGuidance = this.spatialGuidanceStability.update(
+      adaptSpatialGuidance(baseGuidance, predictiveRoadIntelligence, this.spatialIntelligence.maneuverDistanceMeters),
+      this.now(),
+    );
+    this.driverDecision = decideDriverAction({
+      spatial: this.spatialIntelligence,
+      guidance: this.spatialGuidance,
+      restrictionProhibited: restrictionStatus.prohibited,
+      restrictionConfidence: restrictionStatus.confidence,
+      routeReacquire: this.routeReacquire,
+    });
+  }
+
+  private prefetchCommunityRoadIntelligence(): void {
+    const wayIds = Array.from(new Set(this.plannedWaySequence.filter((id) => Number.isFinite(id) && id > 0)));
+    if (!wayIds.length) return;
+    const generation = ++this.communityPrefetchGeneration;
+    void Promise.all([getRoadIntelligenceBatch(wayIds, 30), getRoadIntelligenceTemporal(wayIds, 30)]).then(([items, temporal]) => {
+      if (generation !== this.communityPrefetchGeneration) return;
+      this.communityRoadIntelligence = indexCommunityRoadIntelligence(items);
+      this.communityTemporal = temporal;
+      this.refreshSpatialIntelligence();
+    }).catch(() => {
+      // Community intelligence is advisory. Navigation continues entirely locally.
+    });
   }
 
   private emptyResult(): NavigationFixResult {

@@ -19,6 +19,10 @@ fn cache() -> &'static Mutex<HashMap<String, (Instant, Vec<GeocodeResult>)>> {
 pub struct GeocodeResult {
     pub display_name: String,
     pub location: Location,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,6 +58,9 @@ struct PhotonProperties {
     district: Option<String>,
     state: Option<String>,
     country: Option<String>,
+    osm_key: Option<String>,
+    osm_value: Option<String>,
+    r#type: Option<String>,
 }
 
 fn photon_display_name(p: &PhotonProperties) -> Option<String> {
@@ -118,7 +125,12 @@ async fn photon_search(query: &str, lat: Option<f64>, lng: Option<f64>) -> Resul
             let Some(display_name) = photon_display_name(&f.properties) else { continue; };
             let key = format!("{display_name}|{lat:.5}|{lng:.5}");
             if seen.insert(key) {
-                merged.push(GeocodeResult { display_name, location: Location { lat, lng } });
+                merged.push(GeocodeResult {
+                    display_name,
+                    location: Location { lat, lng },
+                    category: f.properties.osm_value.clone().or_else(|| f.properties.osm_key.clone()),
+                    r#type: f.properties.r#type.clone(),
+                });
             }
             if merged.len() >= 8 { return Ok(merged); }
         }

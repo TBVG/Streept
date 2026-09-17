@@ -1,0 +1,13 @@
+Streept
+
+Copyright (C) 2025-2026 TBVG and contributors.
+
+Streept software is licensed under the GNU Affero General Public License,
+version 3 or (at your option) any later version (AGPL-3.0-or-later).
+
+This software is provided without warranty. See LICENSE.txt for the complete
+license and see the repository's LICENSES/THIRD-PARTY-NOTICES for third-party
+software, data, and asset notices.
+
+The Streept name and branding are not granted under the software license.
+See TRADEMARKS.md in the source repository.

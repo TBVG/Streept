@@ -1,0 +1,1 @@
+import {describe,expect,it} from 'vitest';import {explainDriverDecision} from './driverDecisionExplanation';describe('driverDecisionExplanation',()=>{it('explains lane change',()=>expect(explainDriverDecision({action:'lane-change',priority:1,confidence:.8,reason:'x',targetSpeedMps:null,laneChangeDirection:'left',targetLaneIndex:1} as any)).toContain('left'));});

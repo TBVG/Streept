@@ -1,7 +1,7 @@
 import { Location, Route3DHighlight } from '../types';
 import { NavigationPhase } from './navigationState';
 
-const STORAGE_KEY = 'streept_active_navigation_v1';
+const STORAGE_KEY = 'streept_active_navigation_v2';
 const MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
 export interface PersistedNavigationSession {
@@ -38,6 +38,16 @@ export function readNavigationSession(): PersistedNavigationSession | null {
     const parsed = JSON.parse(raw) as Partial<PersistedNavigationSession>;
     if (typeof parsed.savedAt !== 'number' || Date.now() - parsed.savedAt > MAX_AGE_MS) return null;
     if (!isFiniteLocation(parsed.destination) || !Array.isArray(parsed.routeOptions) || parsed.routeOptions.length === 0) return null;
+    // A persisted route is allowed to resume only when it contains real
+    // routed geometry. Older sessions could contain synthetic fallback paths;
+    // never restore those as navigation truth after the route-integrity pass.
+    const hasUsableGeometry = parsed.routeOptions.every((route) =>
+      route?.provider === 'osrm' && Array.isArray(route.segments) && route.segments.some((segment) =>
+        Array.isArray(segment?.coords) && segment.coords.length >= 2 &&
+        segment.coords.every((point) => Number.isFinite(point?.lat) && Number.isFinite(point?.lng))
+      )
+    );
+    if (!hasUsableGeometry) return null;
     if (parsed.navigationPhase !== 'navigating' && parsed.navigationPhase !== 'rerouting' && parsed.navigationPhase !== 'previewing') return null;
     return {
       destination: parsed.destination,

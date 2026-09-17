@@ -14,7 +14,9 @@ export type NavigationMetricName =
   | 'gps_quality_changed'
   | 'offline_fallback_used'
   | 'route_rank_changed'
-  | 'scene_preload_failed';
+  | 'scene_preload_failed'
+  | 'maneuver_completed'
+  | 'maneuver_missed';
 
 export interface NavigationMetric {
   id: string;

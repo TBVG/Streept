@@ -5,6 +5,9 @@ import { buildSceneConfidence } from './sceneConfidence';
 import { buildSceneRecoveryPlan, SceneRecoveryPlan } from './sceneRecovery';
 import { buildDriverGuidanceFallback, DriverGuidanceFallbackPlan } from './driverGuidanceFallback';
 import { buildSceneComposition, SceneCompositionPlan } from './sceneComposition';
+import { stageLaneChange } from './laneChangeStaging';
+import { buildSceneAttention, SceneAttention } from './sceneAttention';
+import { buildSpatialNavigationPlan } from './spatialNavigationEngine';
 
 export interface ImmersiveNavigationState {
   routeGeneration: number;
@@ -21,6 +24,11 @@ export interface ImmersiveNavigationState {
   shouldReacquireRoute: boolean;
   routeContinuityAllowed: boolean;
   trafficReady: boolean;
+  parkingReady: boolean;
+  nearbyParkingCount: number;
+  billboardReady: boolean;
+  sceneAttention: SceneAttention[];
+  spatialPlan: ReturnType<typeof buildSpatialNavigationPlan>;
 }
 
 export interface ImmersiveNavigationRuntimeInput {
@@ -45,9 +53,11 @@ export function buildImmersiveNavigationState(input: ImmersiveNavigationRuntimeI
   const laneConfidence = snapshot?.currentLane?.confidence ?? 0;
   const matchedConfidence = snapshot?.matched?.confidence ?? 0;
   const currentLaneIndex = snapshot?.currentLane?.laneIndex ?? null;
-  const guidancePlan = maneuver ? buildSceneGuidancePlan(route, maneuver, currentLaneIndex, Math.max(laneConfidence, matchedConfidence), scene) : null;
+  const finalTargetLaneIndex = maneuver?.lanes?.findIndex((lane) => lane.recommended) ?? null;
+  const stagedLane = stageLaneChange(currentLaneIndex, finalTargetLaneIndex);
+  const guidancePlan = maneuver ? buildSceneGuidancePlan(route, maneuver, currentLaneIndex, Math.max(laneConfidence, matchedConfidence), scene, stagedLane.immediateTargetLaneIndex) : null;
   const fallbackManeuver: Maneuver = route.maneuvers?.[0] ?? { type: 'continue', modifier: 'straight', location: route.segments[0]?.coords[0] ?? { lat: 0, lng: 0, alt: 0 }, bearing_before: 0, instruction: 'Continue', is_complex: false, lanes: [] };
-  const safeGuidancePlan = guidancePlan ?? buildSceneGuidancePlan(route, fallbackManeuver, currentLaneIndex, Math.max(laneConfidence, matchedConfidence), scene);
+  const safeGuidancePlan = guidancePlan ?? buildSceneGuidancePlan(route, fallbackManeuver, currentLaneIndex, Math.max(laneConfidence, matchedConfidence), scene, stagedLane.immediateTargetLaneIndex);
   if (!safeGuidancePlan) return null;
   const confidence = buildSceneConfidence(safeGuidancePlan, laneConfidence || matchedConfidence || 0, userLocation, route, scene);
   const recovery = buildSceneRecoveryPlan({ confidence, sceneAgeMs });
@@ -58,6 +68,9 @@ export function buildImmersiveNavigationState(input: ImmersiveNavigationRuntimeI
   const gpsConfidence = snapshot ? Math.min(confidence.gps, snapshot.health.confidence) : confidence.gps;
   const shouldReacquireRoute = Boolean(snapshot && (!snapshot.matched || snapshot.health.gps === 'lost' || snapshot.health.route === 'off-route'));
   const scenario = snapshot?.extremeScenario ?? 'normal';
+  const world = snapshot?.worldContext;
+  const sceneAttention = buildSceneAttention(scene, userLocation, maneuver?.location ?? null);
+  const spatialPlan = buildSpatialNavigationPlan({ route, userLocation, speedMps: snapshot?.speedMps ?? 0, scene, snapshot, sceneAgeMs });
 
   return {
     routeGeneration: snapshot?.routeGeneration ?? 0,
@@ -74,5 +87,10 @@ export function buildImmersiveNavigationState(input: ImmersiveNavigationRuntimeI
     shouldReacquireRoute: Boolean(snapshot?.routeReacquire || shouldReacquireRoute),
     routeContinuityAllowed: recovery.continuityAlpha > 0.25,
     trafficReady: Boolean(scene) && confidence.overall >= 0.45 && recovery.state !== 'scene-stale',
+    parkingReady: Boolean(world && world.parking.length > 0 && world.confidence >= 0.35),
+    nearbyParkingCount: world?.parking.filter((lot) => lot.intelligence.availableSpaces > 0).length ?? 0,
+    billboardReady: Boolean(world && world.billboards.some((item) => item.active && item.attentionScore >= 0.35)),
+    sceneAttention,
+    spatialPlan,
   };
 }

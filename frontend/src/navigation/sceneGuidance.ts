@@ -54,7 +54,7 @@ function routeDistance(coords: RouteCoord[], start: number, end: number): number
 /** Build the renderer-facing geometry plan from the route and lane topology.
  * It intentionally contains no Cesium/React code so the same guidance can be
  * rendered by WebGL, native, or a deterministic test renderer. */
-export function buildSceneGuidancePlan(route: Route3DHighlight, maneuver: Maneuver, currentLaneIndex: number | null = null, currentLaneConfidence = 1, scene: SceneContext | null = null): SceneGuidancePlan | null {
+export function buildSceneGuidancePlan(route: Route3DHighlight, maneuver: Maneuver, currentLaneIndex: number | null = null, currentLaneConfidence = 1, scene: SceneContext | null = null, physicalTargetLaneIndex: number | null = null): SceneGuidancePlan | null {
   const coords = route.segments.flatMap((segment) => segment.coords);
   if (coords.length < 2) return null;
   const maneuverIndex = nearestRouteIndex(coords, maneuver);
@@ -83,8 +83,13 @@ export function buildSceneGuidancePlan(route: Route3DHighlight, maneuver: Maneuv
         return da - db;
       })[0] ?? null;
     if (road) {
+      // Final lane remains the maneuver intent; the physical renderer/execution
+      // target may be staged to one adjacent lane at a time.
+      const physicalTarget = physicalTargetLaneIndex ?? lanePath.targetLaneIndex;
       const runway = Math.max(32, Math.min(80, routeDistance(coords, approachIndex, maneuverIndex)));
-      laneChangeTrajectory = buildLaneChangeTrajectory(road, currentLaneIndex, lanePath.targetLaneIndex, runway);
+      if (physicalTarget != null && currentLaneIndex !== physicalTarget) {
+        laneChangeTrajectory = buildLaneChangeTrajectory(road, currentLaneIndex, physicalTarget, runway);
+      }
     }
   }
   return {

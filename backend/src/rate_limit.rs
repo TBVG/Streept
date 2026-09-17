@@ -88,6 +88,22 @@ macro_rules! rate_limit_fn {
     };
 }
 
+/// Whole-API guardrail for public endpoints. Expensive and mutating routes
+/// also have their own stricter limits below.
+pub async fn limit_global(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    request: Request,
+    next: Next,
+) -> Response {
+    static LIMITER: OnceLock<RateLimiter> = OnceLock::new();
+    let limiter = LIMITER.get_or_init(|| RateLimiter::new(600, Duration::from_secs(60)));
+    if limiter.allow(&addr.ip().to_string()) {
+        next.run(request).await
+    } else {
+        too_many_requests()
+    }
+}
+
 // Auth endpoints: strict limits to slow down credential stuffing / spam
 // account creation.
 rate_limit_fn!(limit_login, 10, 60); // 10 attempts/min per IP

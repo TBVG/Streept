@@ -1,0 +1,1 @@
+import {describe,expect,it} from 'vitest';import {deriveSpatialPriorities} from './spatialPriority';const c:any={spatial:{nearbyReports:1,laneIntelligence:{laneAlignment:'misaligned'}},parking:[],billboards:[]};describe('spatialPriority',()=>{it('puts navigation safety first',()=>expect(deriveSpatialPriorities(c,50)[0].priority).toBe('critical-navigation'));});

@@ -170,3 +170,20 @@
   .immersive-side-controls { right: 10px; }
   .immersive-route-label { bottom: 103px; }
 }
+
+.immersive-junction-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.08);
+  font-size: 11px;
+  letter-spacing: .04em;
+}
+.immersive-junction-state strong { font-size: 11px; }
+.immersive-junction-state span { color: rgba(255,255,255,.62); letter-spacing: 0; }
+.immersive-junction-state.is-high { background: rgba(45,127,249,.18); border-color: rgba(45,127,249,.35); }
+.immersive-junction-state.is-elevated { background: rgba(255,255,255,.10); }

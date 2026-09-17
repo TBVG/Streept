@@ -4,6 +4,15 @@ import { getGuestId } from './services/api';
 import { useTheme } from './hooks/useTheme';
 import './App.css';
 
+function LegalNotice() {
+  return (
+    <div className="legal-notice" aria-label="Streept open-source license notice">
+      <span>Streept · AGPL-3.0-or-later · No warranty</span>
+      <a href="/LICENSE.txt" target="_blank" rel="noreferrer">License</a>
+    </div>
+  );
+}
+
 function OnlineStatus() {
   const [online, setOnline] = React.useState(() => navigator.onLine);
   React.useEffect(() => {
@@ -23,6 +32,7 @@ function App() {
   return (
     <div className="App">
       <OnlineStatus />
+      <LegalNotice />
       <NavigationView
         currentUserId={guestId}
         theme={theme}

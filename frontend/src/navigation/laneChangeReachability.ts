@@ -13,6 +13,8 @@ export interface LaneChangeReachabilityInput {
   reports?: Report[];
   occupants?: LaneOccupantObservation[];
   nowMs?: number;
+  egoSpeedMps?: number | null;
+  egoHeadingDegrees?: number | null;
 }
 
 export interface LaneChangeReachability {
@@ -64,7 +66,7 @@ export function assessLaneChangeReachability(input: LaneChangeReachabilityInput)
     currentSpeedMps: input.speedMps ?? 0,
     distanceToManeuverMeters: input.distanceToManeuverMeters,
   });
-  const traffic = assessLaneChangeTrafficSafety({ trajectory: input.trajectory, targetLane: input.trajectory.targetLane, reports: input.reports, occupants: input.occupants, nowMs: input.nowMs });
+  const traffic = assessLaneChangeTrafficSafety({ trajectory: input.trajectory, targetLane: input.trajectory.targetLane, reports: input.reports, occupants: input.occupants, nowMs: input.nowMs, egoSpeedMps: input.egoSpeedMps, egoHeadingDegrees: input.egoHeadingDegrees });
   const combinedConfidence = Math.min(confidence, marginConfidence, dynamics.confidence, traffic.confidence);
   if (!dynamics.safe) {
     return {

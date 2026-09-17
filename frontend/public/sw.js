@@ -1,5 +1,6 @@
 const CACHE = "streept-shell-v4";
 const RUNTIME = "streept-runtime-v2";
+const MAP_TILES = "streept-map-tiles-v1";
 const SHELL = ["/", "/index.html", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
@@ -8,7 +9,7 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))));
+  event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE && key !== RUNTIME && key !== MAP_TILES).map((key) => caches.delete(key)))));
   self.clients.claim();
 });
 
@@ -16,11 +17,26 @@ self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (request.method !== "GET") return;
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;
-
   const isDocument = request.mode === "navigate" || request.destination === "document";
   const isStatic = ["script", "style", "font", "worker", "manifest"].includes(request.destination);
   const isApiGet = url.pathname.startsWith("/api/");
+  const isEsriMapTile = url.hostname === "server.arcgisonline.com" && url.pathname.includes("/MapServer/tile/");
+
+  if (isEsriMapTile) {
+    event.respondWith(
+      caches.open(MAP_TILES).then(async (cache) => {
+        const cached = await cache.match(request);
+        const network = fetch(request).then((response) => {
+          if (response.ok || response.type === "opaque") cache.put(request, response.clone());
+          return response;
+        }).catch(() => cached || Response.error());
+        return cached || network;
+      })
+    );
+    return;
+  }
+
+  if (url.origin !== self.location.origin) return;
 
   if (isDocument) {
     event.respondWith(

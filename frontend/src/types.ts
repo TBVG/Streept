@@ -58,7 +58,7 @@ export interface Billboard {
 
 export interface SceneCoord { lat: number; lng: number; }
 export interface SceneBuilding { geometry: SceneCoord[]; height: number | null; }
-export interface SceneRoad { osm_id?: number | null; node_ids?: number[]; geometry: SceneCoord[]; highway: string | null; name: string | null; lanes: number | null; oneway: boolean; oneway_reverse?: boolean; maxspeed?: string | null; bridge?: boolean; tunnel?: boolean; turn_lanes?: string[] | null; change_lanes?: string[] | null; destination_lanes?: string[] | null; }
+export interface SceneRoad { osm_id?: number | null; node_ids?: number[]; geometry: SceneCoord[]; highway: string | null; name: string | null; lanes: number | null; oneway: boolean; surface?: string | null; smoothness?: string | null; lit?: boolean; oneway_reverse?: boolean; maxspeed?: string | null; bridge?: boolean; tunnel?: boolean; turn_lanes?: string[] | null; change_lanes?: string[] | null; destination_lanes?: string[] | null; toll?: boolean; }
 export interface ScenePoint { lat: number; lng: number; }
 export interface SceneTree { lat: number; lng: number; }
 export interface SceneRestriction {
@@ -77,6 +77,8 @@ export interface RouteOptions {
 }
 
 export interface Route3DHighlight {
+  /** Provider that produced the geometry. Synthetic geometry is never accepted. */
+  provider?: 'osrm';
   segments: RouteSegment[];
   maneuvers: Maneuver[];
   duration_seconds: number | null;
@@ -131,4 +133,7 @@ export type WsEvent =
 export interface GeocodeResult {
   display_name: string;
   location: Location;
+  /** Optional OpenStreetMap/Photon classification used for richer POI presentation. */
+  category?: string;
+  type?: string;
 }

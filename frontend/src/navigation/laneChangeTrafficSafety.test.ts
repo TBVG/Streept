@@ -3,8 +3,8 @@ import { LaneChangeTrajectory } from './laneChangeTrajectory';
 
 const trajectory: LaneChangeTrajectory = {
   sourceLane: 0, targetLane: 1,
-  points: [{ lat: 0, lng: 0 }, { lat: 0, lng: 0.0001 }],
-  lengthMeters: 11, lateralShiftMeters: 3.5, startFraction: 0, endFraction: 1,
+  points: [{ lat: 0, lng: 0 }, { lat: 0, lng: 0.0002 }],
+  lengthMeters: 22, lateralShiftMeters: 3.5, startFraction: 0, endFraction: 1,
   confidence: 0.95, reachable: true, reason: 'physical',
 };
 
@@ -20,6 +20,44 @@ describe('lane change traffic safety', () => {
     });
     expect(result.safe).toBe(false);
     expect(result.reason).toBe('unsafe-gap');
+  });
+
+
+  it('uses longitudinal gap at the merge point rather than only 2-D proximity', () => {
+    const ahead = assessLaneChangeTrafficSafety({
+      trajectory, targetLane: 1,
+      occupants: [{ id: 'ahead', location: { lat: 0, lng: 0.00009 }, laneIndex: 1, confidence: 0.95 }],
+    });
+    expect(ahead.safe).toBe(false);
+    expect(ahead.gapAheadMeters).not.toBeNull();
+
+    const farther = assessLaneChangeTrafficSafety({
+      trajectory, targetLane: 1,
+      occupants: [{ id: 'far', location: { lat: 0, lng: 0.0002 }, laneIndex: 1, confidence: 0.95 }],
+      cautionDistanceMeters: 20,
+    });
+    expect(farther.safe).toBe(true);
+    expect(farther.gapAheadMeters).toBeGreaterThan(5);
+  });
+
+
+  it('predicts conflict anywhere along the maneuver, not only at the midpoint', () => {
+    const longTrajectory: LaneChangeTrajectory = {
+      ...trajectory,
+      points: [{ lat: 0, lng: 0 }, { lat: 0, lng: 0.00045 }],
+      lengthMeters: 50,
+    };
+    const result = assessLaneChangeTrafficSafety({
+      trajectory: longTrajectory, targetLane: 1, egoSpeedMps: 10,
+      occupants: [{
+        id: 'approaching', location: { lat: 0, lng: 0.00001 }, laneIndex: 1,
+        speedMps: 7, headingDegrees: 90, confidence: 0.95,
+      }],
+      cautionDistanceMeters: 20,
+    });
+    expect(result.safe).toBe(false);
+    expect(result.reason).toBe('unsafe-gap');
+    expect(result.timeToConflictSeconds).not.toBeNull();
   });
 
   it('ignores stale target-lane observations', () => {
@@ -39,3 +77,23 @@ describe('lane change traffic safety', () => {
     expect(accident.reason).toBe('traffic-caution');
   });
 });
+
+  it('blocks a faster vehicle closing from behind even when the static gap is large', () => {
+    const result = assessLaneChangeTrafficSafety({
+      trajectory, targetLane: 1, egoSpeedMps: 10, egoHeadingDegrees: 90,
+      occupants: [{ id: 'closing', location: { lat: 0, lng: -0.00005 }, laneIndex: 1, speedMps: 20, headingDegrees: 90, confidence: 0.95 }],
+    });
+    expect(result.safe).toBe(false);
+    expect(result.reason).toBe('unsafe-gap');
+    expect(result.timeToConflictSeconds).not.toBeNull();
+  });
+
+  it('does not block a faster vehicle ahead that is pulling away', () => {
+    const result = assessLaneChangeTrafficSafety({
+      trajectory, targetLane: 1, egoSpeedMps: 10, egoHeadingDegrees: 90,
+      occupants: [{ id: 'pulling-away', location: { lat: 0, lng: 0.0002 }, laneIndex: 1, speedMps: 20, headingDegrees: 90, confidence: 0.95 }],
+      cautionDistanceMeters: 25,
+    });
+    expect(result.safe).toBe(true);
+    expect(result.timeToConflictSeconds).toBeNull();
+  });

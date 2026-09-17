@@ -1,0 +1,1 @@
+import {describe,expect,it} from 'vitest';import {assessRouteLaneStability} from './routeLaneStability';describe('routeLaneStability',()=>{it('reports stable route',()=>expect(assessRouteLaneStability({steps:[{plannedLaneIndex:1,maneuverIndex:0} as any,{plannedLaneIndex:1,maneuverIndex:1} as any],totalLaneChanges:0,confidence:1}).score).toBe(1));});

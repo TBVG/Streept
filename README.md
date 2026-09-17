@@ -1,237 +1,359 @@
 # Streept
 
-A community-driven navigation web app: turn-by-turn directions with an
-automatic first-person 3D cutaway at turns, live parking availability
-detected from GPS (not manually reserved), crowd-sourced hazard/police/
-traffic reports with confirm/dismiss voting, and roadside billboard ads
-with moderation. Built as a real product exploration, not a demo — real
-auth, real rate limiting, real tests, real CI.
+> **Navigation that doesn't just tell you where to turn — it shows you how to understand the road ahead.**
 
-**Status: immersive navigation architecture complete; current work is product-wide production hardening and release validation.** The project has
-been checked for Docker/runtime configuration issues. The most important
-fix was removing a backend bind mount that hid the compiled Rust binary at
-runtime, and enabling SQLx migrations in the normal backend dependency set.
-A local Docker daemon/compiler was not available in this environment, so
-run `docker compose up --build` on a machine with Docker to perform the
-final end-to-end container build.
+Streept is a **web-first navigation platform** built around a simple idea: traditional navigation treats the world like a flat line on a map. Streept is designed to turn that route into a **spatial, contextual experience**.
 
-## What it actually does
+It combines turn-by-turn routing, lane and junction intelligence, live community information, predictive spatial context, and an immersive first-person 3D view that can appear automatically when a maneuver needs more visual understanding.
 
-- **Turn-by-turn navigation** with a route picker (2–3 alternatives with
-  time/distance tradeoffs, when the underlying routing engine — OSRM —
-  provides them), lane guidance before turns (which lane to be in, when
-  the map data has it), and a heading-aware vehicle icon.
-- **Automatic 2D→3D split view** at turns and complex junctions: the
-  right pane opens a first-person MapLibre GL 3D cutaway of the
-  intersection, camera oriented the way the driver is actually
-  approaching it — proximity-triggered using real distance-along-the-route
-  math, not just "turn exists nearby."
-- **A lightweight AR mode**: camera + compass overlay showing a
-  directional arrow toward the next turn or destination. Explicitly not
-  full ARKit/ARCore-grade anchored AR (no SLAM, nothing locked to the road
-  surface) — that would need a native app, which doesn't exist here.
-- **Parking, detected not reserved**: lots have a capacity and an occupied
-  count; the app infers when you've parked from sustained low GPS speed
-  near a mapped lot, and when you've left from sustained movement
-  afterward. No manual "reserve a spot" button — nobody can actually
-  reserve a public parking spot in real life, only report/detect that
-  it's taken.
-- **Community reports** (police, hazards, construction, accidents, traffic
-  jams, closed lanes) with confirm/dismiss voting — a confirmation extends
-  a report's lifetime, enough dismissals expire it immediately.
-- **Billboards**: book roadside ad space, rendered as real 3D panels in
-  the split-view pane near the route. Every purchase starts in a
-  `pending` moderation state and isn't shown to anyone but the advertiser
-  until an admin approves it — there's no automated image moderation, this
-  is a manual gate.
-- **Real-time updates** over WebSocket: someone else takes a parking spot,
-  files a report, or votes on one — it shows up live for nearby users,
-  geo-filtered so you only get updates relevant to where you actually are.
-- **Destination search** with autocomplete (via Nominatim/OpenStreetMap),
-  a two-field start+destination flow like Google/Apple Maps (with swap),
-  and recent-destination memory.
-- **Accounts**: real registration/login, argon2-hashed passwords, JWT
-  sessions — not anonymous client-generated IDs.
-- **Light/dark theme**, toggleable, persisted, matching both the UI chrome
-  and the map basemap.
-- **Offline-aware**: turn-by-turn keeps working with zero connectivity
-  (it's client-side math against an already-loaded route) — search,
-  rerouting, and live updates correctly pause and resume instead of
-  silently failing or spamming reconnect attempts.
+**The goal:** make navigation feel less like following a line and more like having the road explained to you at the moment it matters.
 
-## Architecture
+---
 
-- **Backend**: Rust, Axum, SQLx (PostgreSQL + PostGIS for geospatial
-  queries), split into a library crate (`lib.rs`) + thin binary, so
-  integration tests can actually exercise the handlers directly.
-- **Frontend**: React + TypeScript + Vite. MapLibre GL JS for the 3D pane,
-  Leaflet for the 2D pane.
-- **Real-time**: a `tokio::sync::broadcast` channel on the backend, fanned
-  out over WebSocket connections geo-filtered per-client.
-- **Auth**: argon2 password hashing, JWT sessions (7-day, no refresh
-  token yet).
-- **Rate limiting**: hand-rolled, per-IP, applied per-route — not a
-  third-party crate, specifically to avoid depending on an
-  axum/tower-version compatibility this environment couldn't verify.
-- **Design system**: CSS custom properties (`App.css`) driving both light
-  and dark themes from the same component styles — an "asphalt and
-  lane-marking" visual language (see `PROJECT_SUMMARY.md` for the design
-  reasoning), Barlow + Public Sans typography.
-- **Testing**: `#[sqlx::test]`-based Rust integration tests (isolated,
-  auto-migrated databases per test) covering auth, parking-count
-  concurrency, report-vote thresholds, and billboard moderation; Vitest
-  unit tests covering the route/geo math (distance, bearing, polyline
-  projection) that the split-view trigger and reroute detection depend on.
-- **CI**: GitHub Actions runs both suites against a real
-  `postgis/postgis` service container on every push.
+## 🚗 Why Streept?
 
-### Free-by-default, keyless
+Most navigation interfaces answer one question:
 
-The default map/search stack is keyless: OpenStreetMap for the 2D basemap,
-OpenFreeMap for the MapLibre base style, Mapterhorn for elevation, and
-Photon with Nominatim fallback for place search. No third-party map key is
-needed. The immersive turn preview uses CesiumJS and OSM geometry. The production frontend container builds the Vite app once and serves the compiled SPA through nginx, with same-origin `/api` and `/ws` reverse proxies to the backend.
+**“Where do I go next?”**
 
-## Known gaps and honest limitations
+Streept is being built to answer a bigger set of questions:
 
-- **Nothing has been run.** No compiler, no browser, no database in this
-  environment. This is the single biggest caveat on the whole project.
-- **AR is compass-guided, not anchored.** Real ARKit/ARCore-grade AR needs
-  a native app (Swift/Xcode or Kotlin/Android Studio), which this project
-  doesn't have.
-- **3D world reconstruction is still stylized** — OSM building massing and lightweight roadside objects are rendered without photorealistic textures or
-  satellite imagery. Alpha 137 adds physical roadside signage; deeper driver-first road/junction reconstruction is next.
-- **No payment processing.** Billboard "purchases" book ad space but don't
-  charge anyone.
-- **The rate limiter is in-memory, per-process** — won't coordinate across
-  multiple backend replicas if this is ever scaled horizontally.
-- **No email verification or password reset flow.**
-- **Free third-party services carry real usage constraints** — Nominatim
-  in particular caps requests at 1/second *application-wide* (not
-  per-user), which the backend enforces with a dedicated request gate; see
-  `backend/src/geocode.rs`.
+- Which lane should I be thinking about before the turn?
+- Is this junction simple or confusing?
+- What does the road ahead actually look like from the driver's perspective?
+- When should the interface switch from a normal map to a more immersive view?
+- What has happened on this road before?
+- What information is actually relevant to me right now?
 
-## Setup
+The result is a navigation system designed around **driver understanding**, not simply route geometry.
 
-See **`SETUP.md`** for full instructions (Docker and manual paths,
-environment variables, testing, and the reasoning behind several of the
-above design decisions). Quick version:
+---
 
-### Prerequisites
-- Rust 1.70+
-- PostgreSQL 14+ with PostGIS
-- Node.js 18+
-- Docker (optional, for containerized deployment)
+## ✨ What Streept can do
 
-### Backend
+### 🗺️ Turn-by-turn navigation
+
+- Route from a starting point to a destination.
+- Multiple route alternatives when the routing provider supplies them.
+- Turn-by-turn maneuver guidance.
+- Distance and maneuver presentation designed for driving.
+- Heading-aware vehicle positioning.
+- Automatic rerouting support.
+
+### 🛣️ Lane intelligence
+
+Streept can reason about the physical road and lane geometry available in its map data, including:
+
+- current-lane matching
+- lane continuity
+- lane splits and merges
+- destination-lane planning
+- lane-change timing
+- directional carriageways
+- turn restrictions
+- complex intersections
+
+Where the underlying map data is detailed enough, Streept can use that information to make guidance more specific than a basic “turn left” instruction.
+
+### 🏙️ Automatic 2D → 3D navigation
+
+This is one of Streept's defining ideas.
+
+Instead of forcing the driver to manually switch between map modes, Streept can decide when a maneuver or junction deserves additional spatial context.
+
+The navigation experience can transition from:
+
+**normal 2D map → preparation view → first-person 3D view**
+
+The immersive view is designed around the driver's approach to the road, rather than simply showing a generic overhead 3D map.
+
+It can include:
+
+- 3D road geometry
+- lane geometry
+- buildings
+- junction structure
+- route highlighting
+- live scene context
+- predictive scene preparation
+- adaptive rendering quality
+
+### 🧠 Spatial intelligence
+
+Streept maintains a spatial intelligence layer around the route.
+
+It combines signals such as:
+
+- road geometry
+- junction complexity
+- lane information
+- navigation outcomes
+- hazards
+- community observations
+- temporal patterns
+- confidence and freshness
+
+The system is designed to become more useful as it accumulates **coarse navigation outcomes and road-level knowledge**, while avoiding the need to store raw GPS traces for the local learning loop.
+
+### 📍 Community road intelligence
+
+Users can report things happening on the road, including:
+
+- hazards
+- police activity
+- construction
+- accidents
+- traffic problems
+- closed lanes
+
+Reports can be confirmed or dismissed by other users, allowing the system to maintain a time-limited confidence in community information.
+
+### 🅿️ Parking intelligence
+
+Streept includes parking-state intelligence designed around **detection rather than fake reservations**.
+
+The system can infer parking activity from movement/location behavior near mapped parking areas and update the surrounding navigation experience accordingly.
+
+### 📡 Live updates
+
+The backend supports real-time WebSocket updates for relevant road/community activity, including changes to reports and parking/traffic-related state.
+
+Updates are geographically filtered so the client does not need to receive every event happening everywhere.
+
+### 📱 Account-free navigation
+
+The normal web navigation experience does not require users to create an account.
+
+The project still contains authenticated backend capabilities for API clients and administrative operations where needed.
+
+### 📴 Offline-aware navigation
+
+Streept is designed to degrade gracefully when connectivity disappears.
+
+An already-loaded route can continue to provide local turn-by-turn guidance. Cached route data and offline map-tile infrastructure are also included, while features that genuinely require a network — such as search, rerouting, and live community updates — pause and recover rather than pretending they still have connectivity.
+
+### 🏷️ Spatial advertising concept
+
+Streept also explores a future advertising layer where roadside advertising can be represented as spatial objects in the navigation world.
+
+In the current product exploration, billboards can appear as 3D roadside panels near the route. This is intentionally treated as a future product surface, with moderation and commercial controls required before a real advertising marketplace.
+
+### 🧭 Lightweight camera guidance
+
+The web app includes a lightweight camera-based directional mode with compass/arrow guidance.
+
+It is **not** presented as full ARKit/ARCore-grade augmented reality. True road-anchored AR would require a native mobile implementation and additional platform capabilities.
+
+---
+
+## 🧩 What makes the project different
+
+Streept is not being built as another thin map wrapper.
+
+Its long-term product direction is a **navigation intelligence layer attached to the physical road network**.
+
+The architecture is intended to connect:
+
+**Route → Road → Lane → Junction → Scene → Context → Outcome → Learning**
+
+That creates a foundation for progressively richer navigation rather than simply adding more buttons to a map.
+
+The project is deliberately being developed as a real product architecture, with real routing, database persistence, WebSockets, rate limiting, tests, offline state, scene streaming, and production-oriented boundaries rather than a static visual demo.
+
+---
+
+## 🏗️ Technology
+
+| Layer | Technology |
+|---|---|
+| Frontend | React + TypeScript + Vite |
+| 2D maps | Leaflet |
+| Immersive 3D | CesiumJS |
+| Backend | Rust + Axum |
+| Database | PostgreSQL + PostGIS |
+| Routing | OSRM-compatible routing |
+| Geocoding | Photon / OpenStreetMap ecosystem |
+| Real-time | WebSockets + Tokio broadcast |
+| Offline client state | IndexedDB + Service Worker + Cache API |
+| Containers | Docker Compose |
+
+The project also contains infrastructure for self-hosted routing, scene-tile sharding, provider fallback, adaptive 3D rendering, and privacy-conscious on-device learning.
+
+---
+
+## 🖥️ Run Streept locally
+
+The easiest way to experiment with the current build is Docker.
+
+### Requirements
+
+- Windows, macOS, or Linux
+- Docker Desktop / Docker Engine
+- Docker Compose
+
+### Start the application
+
+From the project root:
 
 ```bash
-cd backend
-export DATABASE_URL=postgresql://postgres:postgres@localhost/navigation_app
-export JWT_SECRET=some-random-string-for-dev
-cargo run
+docker compose up --build
 ```
 
-### Database
+Then open:
 
-```bash
-createdb navigation_app
-psql navigation_app -c "CREATE EXTENSION postgis;"
+```text
+http://localhost:3000
 ```
 
-Migrations run automatically on backend startup.
+The backend runs separately behind the frontend and communicates with PostgreSQL/PostGIS.
 
-### Frontend
+For more detailed setup instructions, see:
 
-```bash
-cd frontend
-npm install
-npm run dev
+- `DOCKER_QUICKSTART.md`
+- `SETUP.md`
+- `IMMERSIVE_NAVIGATION.md`
+- `OFFLINE_AND_DATA_OPERATIONS.md`
+
+---
+
+## 📱 Test Streept on a phone — without publishing an app
+
+Streept is **web-first**, so you do not need the App Store to test it on a phone.
+
+Your computer and phone can be connected to the same Wi-Fi network. Run Streept on the computer, find the computer's local IP address, and open the Streept frontend from the phone using that address and port `3000`.
+
+For example:
+
+```text
+http://192.168.1.25:3000
 ```
 
-## API
+This lets you test the actual mobile browser experience, including:
 
-`backend/openapi.yaml` is maintained alongside the API surface; it documents the current routes below and intentionally does not expose the removed parking-reservation API.
+- touch interaction
+- responsive layouts
+- GPS permissions
+- navigation UI
+- portrait/landscape behavior
+- 3D performance
+- offline behavior
 
-### Core Endpoints
+No App Store listing is required.
 
-- `POST /api/auth/register` / `POST /api/auth/login` - Account creation and sessions
-- `GET /api/geocode?q=<query>` - Destination search (Nominatim-backed)
-- `GET /api/parking?destination=<lat>,<lng>` - Nearby lots with occupancy counts
-- `POST /api/parking/checkin` / `POST /api/parking/checkout` - Auto-called by GPS detection, not manual
-- `POST /api/parking/heartbeat` - Keep a check-in alive while parked
-- `GET /api/reports?lat=<lat>&lng=<lng>&radius=<meters>` - Nearby reports
-- `POST /api/reports` - Create a report
-- `POST /api/reports/:id/confirm` / `POST /api/reports/:id/dismiss` - Vote on a report
-- `GET /api/billboards?lat=<lat>&lng=<lng>&radius=<meters>` - Nearby billboards
-- `POST /api/billboards/:id/purchase` - Book billboard ad space (starts `pending` moderation)
-- `POST /api/billboards/:id/click` - Click-through tracking
-- `POST /api/billboards/:id/moderate` - Admin-only approve/reject
-- `GET /api/route?from=<lat>,<lng>&to=<lat>,<lng>` - Route(s) with 3D highlight + lane guidance data
-- `WS /ws` - Real-time updates (geo-filtered per connection)
+---
 
-## Testing
+## 💸 The $0 deployment goal
 
-```bash
-# Backend — requires a Postgres server your role can CREATE DATABASE on
-cd backend
-export DATABASE_URL=postgresql://postgres:postgres@localhost/postgres
-cargo test
+The immediate deployment target is a **public Streept website that can be operated using free tiers**, rather than requiring paid infrastructure from day one.
 
-# Frontend
-cd frontend
-npm test
+The intended architecture is:
+
+```text
+User's browser
+      ↓
+Free static web hosting
+      ↓
+Rust API / backend
+      ↓
+PostgreSQL + PostGIS
+      ↓
+Routing / map / spatial data
 ```
 
-CI (`.github/workflows/ci.yml`) runs both automatically on push.
+The project is being kept provider-neutral so that free-tier services can be used while Streept is small, with self-hosted alternatives available as the project grows.
 
-## Deployment
+**Important:** “free” applies to the initial prototype/public-testing stage. Map tiles, routing, traffic, 3D data, bandwidth, and database usage can eventually exceed free-tier limits. Provider terms and data licenses must also be respected.
 
-```bash
-docker-compose up -d
-```
+A custom domain is optional. Streept can initially be tested through a free hosting URL.
 
-See `docker-compose.yml` and the `Dockerfile`s in `backend/`/`frontend/`.
+---
 
-## License
+## 🗺️ Maps, routing and data
 
-Licensed under the Apache License, Version 2.0
+Streept is designed to avoid locking the product to one commercial mapping provider.
 
+The current web prototype uses a public Esri raster basemap and OSRM-compatible routing. The project also contains a path for self-hosted OSRM using regional OpenStreetMap data.
 
-### Search and location behavior
+For production deployment, verify the current terms for every external provider before caching, redistributing, or commercially using its data.
 
-Destination autocomplete uses the free Photon OpenStreetMap geocoder. Searches are lightly biased toward the current GPS position but also retain a global query so a destination such as “Times Square” can be found even when the driver is far away. The backend caches searches and the browser has a provider fallback. Nominatim is intentionally not used for autocomplete because its public service explicitly prohibits client-side autocomplete.
+OpenStreetMap-derived data has its own licensing and attribution requirements and is not owned by Streept.
 
-The map automatically flies to the first valid GPS fix after startup. A location button in the lower-right corner re-centers the map on the current position without repeatedly stealing manual pan/zoom control.
+---
 
-## Current 3D milestone
+## 🔐 Privacy and learning
 
-**Alpha 138 — Driver-First 3D Road Geometry (complete).**
+The local learning system is intentionally conservative.
 
-Streept's immersive turn view now treats the physical road as the primary navigation surface. The immediate route lane receives a lightweight physical highlight, the recommended/current/destination lane is preferred when lane metadata is available, and the upcoming junction branch is emphasized using the same physical connector topology used by lane intelligence. This sits on top of the existing streamed OSM road/building context, live traffic, roadside infrastructure, billboards, scene LOD, and adaptive render-quality systems.
+The browser can record coarse navigation outcomes such as:
 
-**Alpha 139 — Junction Comprehension & Driver Cues is complete.** Complex junctions now receive explicit approach, decision, and exit cue zones; selected physical branches stay dominant while alternatives remain muted; and the cue hierarchy reinforces the driver-first lane surface and existing lane/sign/maneuver guidance without turning the whole scene into UI. **Alpha 140 — Route-Ahead Visual Continuity is complete.** The driver-first road surface now carries a restrained physical continuity bridge toward the next maneuver, stopping before the next decision zone so junction cues can take over without competing visual emphasis. Deterministic validation covers consecutive maneuvers and final-maneuver behavior. The next focus is **Alpha 143 — Adaptive Scene Confidence**.
+- maneuver completed
+- maneuver missed
+- hazard observed
+- lane misalignment
 
-**Alpha 142 — Predictive Junction Approach is complete.** Immersive junction cues now use physical driver distance and live speed to tune preparation timing and prominence. Fast approaches get earlier bounded preparation, slow/stop-and-go traffic keeps a useful spatial runway without lighting the route too far ahead, and nearby decisions become progressively stronger. The predictive model is renderer-neutral and deterministic. 
-**Alpha 141 — Multi-Maneuver Scene Choreography is complete.** Current, next, and following maneuvers now share one renderer-neutral priority stack. Closely spaced decisions compress the next preparation window and suppress a following preview when there is not enough physical road to make it useful. The existing physical route-ahead surface is reused rather than adding another visual overlay.
+The local learning model uses these coarse observations rather than requiring a raw GPS history or a server-side personal profile.
 
-**Alpha 143 — Adaptive Scene Confidence (complete).** Immersive guidance now scales visual authority using lane-match, junction-topology, GPS proximity, and scene-coverage confidence. Uncertain guidance is deliberately quieter rather than being presented as a high-confidence physical claim. **Alpha 144 — Confidence-Aware Route Recovery is complete.** Confidence drops now enter a reversible recovery state: lane/GPS uncertainty is distinguished from stale scene context, physical guidance remains continuous but restrained, and freshly fetched scene timestamps let the renderer avoid presenting old map context with full authority. The next focus is **Alpha 145 — Driver Trust & Guidance Fallback**.
-**Alpha 145 — Driver Trust & Guidance Fallback is complete.** The immersive renderer now uses an explicit lane → junction → route → maneuver trust hierarchy. When lane matching is weak, lane geometry is restrained; when physical junction topology remains reliable it can carry the guidance; when that also becomes uncertain, Streept preserves route continuity without pretending to know the exact lane or branch. Severe uncertainty suppresses physical claims and leaves the maneuver instruction authoritative. The next focus is **Alpha 146 — Guidance Consistency & Transition Smoothing**.
+This is a product direction and architecture choice, not a claim that the entire Streept platform is privacy-perfect or that every future feature will use the same data model.
 
-**Alpha 147 — Uncertainty-Aware Scene Composition is complete.** Scene confidence, recovery state, and guidance fallback now feed one deterministic composition policy. Trusted driver guidance remains prominent while uncertain OSM world context, traffic, infrastructure, and billboard detail become visually subordinate rather than disappearing. The composition also bounds world detail during degraded states and preserves route continuity through recovery.
+---
 
+## ⚖️ License and intellectual property
 
-### Alpha 148 — Scene Freshness & Recovery Continuity
-Streept now tracks 3D scene freshness explicitly, progressively subordinates aging world context, invalidates stale cached maneuver scenes, and reacquires them without removing route continuity.
+The Streept source code is licensed under **GNU AGPL v3 or later**. See `LICENSE`.
 
-## Alpha 150 status
-Predictive scene prefetch is complete. Streept now forecasts near-future 3D scene demand from route geometry, speed and heading, biases bubble reacquisition toward the forward driving corridor, and combines predictive targets with the existing route-ahead safety net. Alpha 149's warm/handoff lifecycle remains responsible for seamless overlap and retirement.
+The project separately identifies:
 
+- Streept trademarks and branding
+- third-party libraries and their licenses
+- OpenStreetMap/ODbL data obligations
+- original datasets
+- potential proprietary algorithms/IP
+- patents and other separately protected intellectual property
 
-## Alpha 152 status
-Cross-bubble scene objects now use stable OSM/node/geometry identities and duplicate scene records are removed before chunk rendering.
+See `COPYRIGHT.md`, `TRADEMARKS.md`, `CONTRIBUTING.md`, and `LICENSES/THIRD-PARTY-NOTICES`.
 
+Free hosting does **not** require changing the AGPL license.
 
-## Local verification
+Before a public commercial launch, perform a final third-party asset, map-data, and provider-terms audit.
 
-From the repository root, run `scripts\verify.ps1` on Windows PowerShell or `./scripts/verify.sh` on macOS/Linux. The verification flow installs frontend dependencies, runs the Vitest suite, builds the production frontend, validates Docker Compose, starts PostgreSQL + backend + nginx, and waits for both health endpoints. The Docker stack is intentionally left running after a successful smoke test so the app can be opened at `http://localhost:3000`.
+---
+
+## 🧪 Project status
+
+**Current milestone: Phase 8 — web-first production expansion.**
+
+The current codebase contains the core navigation and spatial product architecture, including the 2D navigation experience, immersive 3D navigation, lane/junction intelligence, community intelligence, offline-aware state, on-device learning, self-hostable routing infrastructure, and scalable scene-tile infrastructure.
+
+The next major goal is not an App Store release.
+
+It is:
+
+> **Get Streept running reliably as a publicly accessible website and prove the complete experience on real phones and real networks.**
+
+Some production inputs remain external to the codebase, including regional routing datasets, large-scale 3D scene data, real traffic-provider feeds, and eventual production-scale infrastructure.
+
+---
+
+## 🛣️ Road ahead
+
+The project is being developed in stages:
+
+1. **Web product** — make Streept reliably usable in a browser.
+2. **Public deployment** — operate the first version using free-tier infrastructure where practical.
+3. **Real-world testing** — test navigation on phones and real roads.
+4. **Spatial intelligence** — continue improving lane, junction, scene, and road-context reasoning.
+5. **Data and learning** — improve privacy-conscious road intelligence using real observations.
+6. **Scale** — move toward self-hosted routing, richer scene data, stronger offline support, and production infrastructure as usage requires.
+7. **Native platforms** — iOS, Android, CarPlay and other platform integrations are future expansion tracks, not requirements for the web product.
+
+---
+
+## 🤝 Contributing
+
+See `CONTRIBUTING.md` for contribution and licensing information.
+
+---
+
+## 📌 In one sentence
+
+**Streept is a web-first navigation platform that combines turn-by-turn routing with lane intelligence, community road knowledge, predictive spatial context, and an automatically triggered first-person 3D view to help drivers understand the road ahead.**

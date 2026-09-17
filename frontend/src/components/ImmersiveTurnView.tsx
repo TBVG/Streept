@@ -35,6 +35,8 @@ import { SceneResidencyManager } from '../navigation/sceneResidency';
 import { SceneLifecycleGuard } from '../navigation/sceneLifecycleGuard';
 import { buildImmersiveNavigationState, ImmersiveNavigationState } from '../navigation/immersiveNavigationRuntime';
 import { NavigationEngineSnapshot } from '../navigation/navigationEngine';
+import { deriveJunctionGuidanceState } from '../navigation/junctionGuidanceState';
+import { assessBillboardSafety } from '../navigation/billboardSafety';
 import './ImmersiveTurnView.css';
 
 // CesiumJS is loaded at runtime so the core app remains key-free. The
@@ -224,14 +226,14 @@ const ImmersiveTurnView: React.FC<Props> = ({ route, userLocation, maneuver, rem
             length: 2.7,
             topRadius: 0.48,
             bottomRadius: 0.62,
-            material: Cesium.Color.fromCssColorString('#2d7ff9'),
+            material: Cesium.Color.fromCssColorString('#ffd33d'),
             outline: true,
-            outlineColor: Cesium.Color.WHITE.withAlpha(0.9),
+            outlineColor: Cesium.Color.WHITE.withAlpha(0.95),
           },
           point: {
             pixelSize: 8,
             color: Cesium.Color.WHITE,
-            outlineColor: Cesium.Color.fromCssColorString('#2d7ff9'),
+            outlineColor: Cesium.Color.fromCssColorString('#ffd33d'),
             outlineWidth: 3,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
@@ -251,7 +253,7 @@ const ImmersiveTurnView: React.FC<Props> = ({ route, userLocation, maneuver, rem
         } catch (imageryError) {
           console.warn('High-resolution aerial imagery unavailable; using generated scene.', imageryError);
         }
-        await renderScene(Cesium, viewer, route, maneuver, sceneCacheRef.current, sceneKeyRef, hasInitialCameraRef, staticPrimitiveRef, sceneGenerationRef.current, sceneGenerationRef, onSceneContext, currentLaneIndex, currentLaneConfidence, destinationLabel, laneExecution, userLocation, speedMps, liveTrafficVehicles, trafficVehicleEntitiesRef, null, scenePlanRef, guidanceEntitiesRef, vehicleEntityRef, sceneChunkPrimitivesRef, sceneChunkEntitiesRef, adaptiveQualityRef.current.getTier(), billboards, guidanceSmootherRef, sceneFetchedAtRef, sceneResidencyRef, scenePrimitivePoolRef, sceneLifecycleRef, sceneReacquisitionLocationRef, sceneChunkRetireAtRef, cameraTargetRef, immersiveNavigationState);
+        await renderScene(Cesium, viewer, route, maneuver, sceneCacheRef.current, sceneKeyRef, hasInitialCameraRef, staticPrimitiveRef, sceneGenerationRef.current, sceneGenerationRef, onSceneContext, currentLaneIndex, currentLaneConfidence, destinationLabel, laneExecution, userLocation, speedMps, liveTrafficVehicles, trafficVehicleEntitiesRef, null, scenePlanRef, guidanceEntitiesRef, vehicleEntityRef, sceneChunkPrimitivesRef, sceneChunkEntitiesRef, adaptiveQualityRef.current.getTier(), billboards, guidanceSmootherRef, sceneFetchedAtRef, sceneResidencyRef, scenePrimitivePoolRef, sceneLifecycleRef, sceneReacquisitionLocationRef, sceneChunkRetireAtRef, cameraTargetRef, immersiveNavigationState, navigationSnapshot, remainingMeters);
 
         // One persistent animation loop smooths GPS changes. We never snap
         // the camera to every browser geolocation fix.
@@ -371,7 +373,7 @@ const ImmersiveTurnView: React.FC<Props> = ({ route, userLocation, maneuver, rem
       sceneLifecycleRef.current.invalidate();
     }
     sceneLifecycleRef.current.begin();
-    void renderScene(Cesium, viewer, route, maneuver, sceneCacheRef.current, sceneKeyRef, hasInitialCameraRef, staticPrimitiveRef, generation, sceneGenerationRef, onSceneContext, currentLaneIndex, currentLaneConfidence, destinationLabel, laneExecution, userLocation, speedMps, liveTrafficVehicles, trafficVehicleEntitiesRef, sceneContext ?? dynamicSceneContext, scenePlanRef, guidanceEntitiesRef, vehicleEntityRef, sceneChunkPrimitivesRef, sceneChunkEntitiesRef, adaptiveQualityRef.current.getTier(), billboards, guidanceSmootherRef, sceneFetchedAtRef, sceneResidencyRef, scenePrimitivePoolRef, sceneLifecycleRef, sceneReacquisitionLocationRef, sceneChunkRetireAtRef, cameraTargetRef, immersiveNavigationState);
+    void renderScene(Cesium, viewer, route, maneuver, sceneCacheRef.current, sceneKeyRef, hasInitialCameraRef, staticPrimitiveRef, generation, sceneGenerationRef, onSceneContext, currentLaneIndex, currentLaneConfidence, destinationLabel, laneExecution, userLocation, speedMps, liveTrafficVehicles, trafficVehicleEntitiesRef, sceneContext ?? dynamicSceneContext, scenePlanRef, guidanceEntitiesRef, vehicleEntityRef, sceneChunkPrimitivesRef, sceneChunkEntitiesRef, adaptiveQualityRef.current.getTier(), billboards, guidanceSmootherRef, sceneFetchedAtRef, sceneResidencyRef, scenePrimitivePoolRef, sceneLifecycleRef, sceneReacquisitionLocationRef, sceneChunkRetireAtRef, cameraTargetRef, immersiveNavigationState, navigationSnapshot, remainingMeters);
   }, [route, maneuver, currentLaneIndex, currentLaneConfidence, destinationLabel, laneExecution, sceneContext, dynamicSceneContext, renderQualityTier, billboards, navigationSnapshot?.routeGeneration, immersiveNavigationState?.overallConfidence]);
 
   useEffect(() => {
@@ -482,6 +484,11 @@ const ImmersiveTurnView: React.FC<Props> = ({ route, userLocation, maneuver, rem
   const highlightIndex = currentLaneIndex != null ? Math.min(arrows.length - 1, Math.max(0, currentLaneIndex)) : (arrows.length > 0 ? Math.min(arrows.length - 1, Math.max(0, arrows.length - 2)) : 0);
   const instruction = maneuver?.instruction ?? 'Follow the route';
   const exitMatch = instruction.match(/\b(?:exit|junction|ramp)\s+([A-Za-z0-9-]+)/i);
+  const junctionGuidance = deriveJunctionGuidanceState(
+    navigationSnapshot?.spatialIntelligence.intersectionIntelligence,
+    navigationSnapshot?.spatialIntelligence.laneIntelligence,
+    navigationSnapshot?.spatialIntelligence.maneuverDistanceMeters ?? remainingMeters,
+  );
 
   return (
     <div className="immersive-turn-view">
@@ -502,6 +509,10 @@ const ImmersiveTurnView: React.FC<Props> = ({ route, userLocation, maneuver, rem
             <div className="immersive-distance">{remainingMeters !== null ? `${Math.max(0, Math.round(remainingMeters))} m` : 'Upcoming'}</div>
             <div className="immersive-instruction">{instruction}</div>
             <div className="immersive-subtitle">{maneuver?.lanes?.length ? `${maneuver.lanes.length}-lane approach · predictive turn preview` : 'Predictive turn preview'}{currentLaneIndex != null ? ` · You are in lane ${currentLaneIndex + 1}` : ''}{laneExecution?.phase === 'changing' ? ' · Changing lane' : laneExecution?.phase === 'completed' ? ' · Lane change complete' : laneExecution?.phase === 'missed' ? ' · Lane change missed' : ''}</div>
+            {junctionGuidance.label && <div className={`immersive-junction-state is-${junctionGuidance.urgency}`}>
+              <strong>{junctionGuidance.label}</strong>
+              {junctionGuidance.detail && <span>{junctionGuidance.detail}</span>}
+            </div>}
           </div>
           {exitMatch && <div className="immersive-exit-badge">Exit {exitMatch[1]}</div>}
         </div>
@@ -579,6 +590,8 @@ async function renderScene(
   sceneChunkRetireAtRef: React.MutableRefObject<Map<string, number>> | null = null,
   cameraTargetRef: React.MutableRefObject<{ location: Location; bearing: number } | null> | null = null,
   immersiveNavigationState: ImmersiveNavigationState | null = null,
+  navigationSnapshot: NavigationEngineSnapshot | null = null,
+  remainingMeters: number | null = null,
 ) {
   if (!route || viewer.isDestroyed() || generation !== generationRef.current) return;
   const lifecycleToken = sceneLifecycleRef?.current.begin() ?? null;
@@ -592,9 +605,10 @@ async function renderScene(
     : `route:${routeKey}`;
   const scenePlan = buildSceneRenderPlan(providedSceneContext, maneuver?.location ?? coords[0]);
   const sceneFreshness = maneuver && sceneFreshnessRef ? sceneFreshnessRef.current.getPlan(sceneKey) : null;
+  const billboardSafety = assessBillboardSafety({ distanceToManeuverMeters: navigationSnapshot?.spatialIntelligence.maneuverDistanceMeters ?? remainingMeters, maneuverCritical: Boolean(navigationSnapshot?.spatialPriorities?.some((p: { priority?: string }) => p.priority === 'critical-navigation')), speedMps: speedMps ?? 0 });
   const sceneAgeMs = sceneFreshness?.ageMs ?? null;
   const chunks = splitSceneIntoChunks(providedSceneContext, maneuver?.location ?? coords[0]);
-  const billboardKey = billboards.map((billboard) => `${billboard.id}:${billboard.ad_image_url ?? ''}:${billboard.display_end ?? ''}:${billboard.is_purchased ? 'live' : 'empty'}`).sort().join('|');
+  const billboardKey = (billboardSafety.allowed ? billboards : []).map((billboard) => `${billboard.id}:${billboard.ad_image_url ?? ''}:${billboard.display_end ?? ''}:${billboard.is_purchased ? 'live' : 'empty'}`).sort().join('|');
   const freshnessState = sceneFreshness?.state ?? 'unknown';
   const lifecycleKey = `${sceneKey}|scene:${scenePlan.key}|freshness:${freshnessState}|chunks:${sceneChunkPlanKey(chunks)}|billboards:${billboardKey}`;
   if (sceneKeyRef.current === lifecycleKey && viewer.scene.primitives.contains?.(staticPrimitiveRef.current)) return;
@@ -633,7 +647,7 @@ async function renderScene(
   // physical surface before buildings/signage, so the road itself answers
   // the driver's primary question: where should I be driving?
   if (maneuver) {
-    addDriverFirstRoadGeometry(Cesium, route, maneuver, scenePrimitives, scene, destinationLabel, currentLaneIndex, currentLaneConfidence, laneExecution, userLocation, speedMps, sceneAgeMs, guidanceSmootherRef);
+    addDriverFirstRoadGeometry(Cesium, route, maneuver, scenePrimitives, scene, destinationLabel, currentLaneIndex, currentLaneConfidence, laneExecution, userLocation, speedMps, sceneAgeMs, guidanceSmootherRef, navigationSnapshot);
     addRouteAheadContinuity(Cesium, route, maneuver, scenePrimitives, userLocation);
   }
 
@@ -876,7 +890,7 @@ function addRouteLine(Cesium: CesiumLike, viewer: CesiumLike, coords: RouteCoord
       clampToGround: true,
       material: new Cesium.PolylineGlowMaterialProperty({
         glowPower: 0.16,
-        color: Cesium.Color.fromCssColorString('#2d7ff9'),
+        color: Cesium.Color.fromCssColorString('#20F28A'),
       }),
     },
   });
@@ -1042,6 +1056,7 @@ function addDriverFirstRoadGeometry(
   speedMps: number | null = 0,
   sceneAgeMs: number | null = null,
   guidanceSmootherRef: React.MutableRefObject<GuidanceTransitionSmoother> | null = null,
+  navigationSnapshot: NavigationEngineSnapshot | null = null,
 ) {
   const coords = route.segments.flatMap((segment) => segment.coords);
   if (coords.length < 2) return;
@@ -1126,6 +1141,17 @@ function addDriverFirstRoadGeometry(
   // and exit confirms the committed path. Simple turns stay intentionally quiet.
   const cuePlan = buildJunctionCuePlan(route, maneuver, plan.junctionBehavior);
   const predictive = userLocation ? buildPredictiveJunctionApproach(route, maneuver, userLocation, speedMps) : null;
+  const intersection = navigationSnapshot?.spatialIntelligence.intersectionIntelligence ?? null;
+  // The navigation engine is the source of truth for junction complexity. The
+  // renderer may fall back to its local maneuver classifier, but it never
+  // upgrades a junction beyond what the engine has actually established.
+  const engineComplex = intersection?.complexity === 'complex';
+  const enginePreparation = intersection?.preparationDistanceMeters ?? 0;
+  const junctionBehavior = intersection?.behavior ?? plan.junctionBehavior.kind;
+  const junctionProminence = engineComplex && predictive
+    ? Math.max(predictive.prominence, Math.min(1, 0.55 + (enginePreparation > 0 ? Math.max(0, 1 - (predictive.distanceToManeuverMeters / Math.max(1, enginePreparation))) * 0.45 : 0)))
+    : predictive?.prominence ?? 0;
+
   if (cuePlan) {
     const roadWidthCue = Math.min(11, Math.max(6.6, plan.laneCount * 3.3));
     const addZone = (startIndex: number, endIndex: number, alpha: number) => {
@@ -1149,9 +1175,28 @@ function addDriverFirstRoadGeometry(
       }));
     };
     cuePlan.zones.forEach((zone) => {
-      const predictiveScale = predictive && zone.zone === 'approach' ? Math.max(0.55, predictive.prominence) : 1;
+      const predictiveScale = predictive && zone.zone === 'approach' ? Math.max(0.55, engineComplex ? junctionProminence : predictive.prominence) : 1;
       addZone(zone.startIndex, zone.endIndex, zone.emphasis * 0.20 * predictiveScale * confidence.guidanceAlpha * recovery.guidanceAlpha);
     });
+
+    if (engineComplex && navigationSnapshot?.spatialIntelligence.maneuverDistanceMeters != null) {
+      const distance = navigationSnapshot.spatialIntelligence.maneuverDistanceMeters;
+      const active = enginePreparation > 0 && distance <= enginePreparation;
+      if (active) {
+        const labels = new Cesium.LabelCollection();
+        labels.add({
+          position: Cesium.Cartesian3.fromDegrees(maneuver.location.lng, maneuver.location.lat, 3.2),
+          text: junctionBehavior.replace('-', ' ').toUpperCase(),
+          font: '700 13px system-ui',
+          fillColor: Cesium.Color.WHITE.withAlpha(Math.max(0.55, junctionProminence)),
+          showBackground: true,
+          backgroundColor: Cesium.Color.fromCssColorString('#101714').withAlpha(0.82),
+          pixelOffset: new Cesium.Cartesian2(0, -18),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        });
+        primitives.add(labels);
+      }
+    }
 
     const branchCandidates = plan.connectorTopology.connectors.filter((candidate) => candidate.points.length >= 2);
     branchCandidates.forEach((candidate) => {

@@ -9,15 +9,22 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || (typeof window !== 'undefin
 
 /** WebSocket endpoint used for live reports/parking updates. */
 export const getWebSocketUrl = (): string => {
-  const configured = import.meta.env.VITE_WS_URL;
+  const configured = import.meta.env.VITE_WS_URL?.trim();
   if (configured) return configured;
 
+  // The bundled nginx exposes the socket publicly as /ws while the Axum
+  // backend exposes it as /api/ws. When the API is same-origin we must use
+  // nginx's public path; when VITE_API_URL points directly at the backend
+  // during local development we must include the backend /api prefix.
   try {
-    const url = new URL(API_BASE_URL);
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    url.pathname = '/ws';
-    url.search = '';
-    return url.toString();
+    const apiUrl = new URL(API_BASE_URL);
+    const browserOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+    const isSameOrigin = browserOrigin && apiUrl.origin === browserOrigin;
+    apiUrl.protocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+    apiUrl.pathname = isSameOrigin ? '/ws' : '/api/ws';
+    apiUrl.search = '';
+    apiUrl.hash = '';
+    return apiUrl.toString();
   } catch {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${protocol}//${window.location.host}/ws`;
@@ -49,6 +56,7 @@ const api = axios.create({
 // The app is intentionally account-free. Send a stable anonymous id so
 // per-user features can still distinguish this browser from other browsers.
 api.interceptors.request.use((config) => {
+  config.headers = config.headers || {};
   config.headers['X-Guest-ID'] = getGuestId();
   config.headers['X-Client-Request-ID'] = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `req-${Date.now()}`;
   return config;
@@ -254,6 +262,7 @@ const parseOsrmRoutes = (payload: OsrmRouteResponse): Route3DHighlight[] => {
     }));
 
     return [{
+      provider: 'osrm',
       segments: [{
         coords,
         is_highlighted: true,
@@ -292,7 +301,7 @@ const getRouteDirectFromOsrm = async (from: Location, to: Location): Promise<Rou
   return parseOsrmRoutes(data);
 };
 
-const ROUTE_CACHE_KEY = 'streept_route_cache_v2';
+const ROUTE_CACHE_KEY = 'streept_route_cache_v3';
 const ROUTE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const ROUTE_CACHE_MAX_ENTRIES = 24;
 
@@ -307,6 +316,18 @@ const parseCacheKey = (key: string): { from: Location; to: Location } => {
   return { from: { lat: flat, lng: flng }, to: { lat: tlat, lng: tlng } };
 };
 
+const isRealRoutedGeometry = (route: Route3DHighlight): boolean => {
+  if (!route || route.provider !== 'osrm') return false;
+  const points = route.segments?.flatMap((segment) => segment?.coords ?? []) ?? [];
+  return points.length >= 2 && points.every((point) =>
+    Number.isFinite(point?.lat) && Number.isFinite(point?.lng) &&
+    Math.abs(point.lat) <= 90 && Math.abs(point.lng) <= 180
+  );
+};
+
+const filterRealRoutes = (routes: Route3DHighlight[]): Route3DHighlight[] =>
+  routes.filter(isRealRoutedGeometry);
+
 const readRouteCache = (key: string): Route3DHighlight[] | null => {
   try {
     const raw = localStorage.getItem(ROUTE_CACHE_KEY);
@@ -314,7 +335,8 @@ const readRouteCache = (key: string): Route3DHighlight[] | null => {
     const parsed = JSON.parse(raw) as Record<string, { savedAt: number; routes: Route3DHighlight[]; from?: Location; to?: Location }>;
     const entry = parsed[key];
     if (!entry || Date.now() - entry.savedAt > ROUTE_CACHE_TTL_MS || !Array.isArray(entry.routes) || entry.routes.length === 0) return null;
-    return entry.routes;
+    const routes = filterRealRoutes(entry.routes);
+    return routes.length ? routes : null;
   } catch {
     return null;
   }
@@ -425,7 +447,8 @@ export const getRoute = async (from: Location, to: Location): Promise<Route3DHig
   try {
     const response = await api.get(`/route?from=${encodeURIComponent(`${from.lat},${from.lng}`)}&to=${encodeURIComponent(`${to.lat},${to.lng}`)}`, { timeout: 12000 });
     if (response.data?.success && Array.isArray(response.data?.data?.routes) && response.data.data.routes.length) {
-      const routes = rankRoutes(response.data.data.routes);
+      const routes = rankRoutes(filterRealRoutes(response.data.data.routes));
+      if (!routes.length) throw new Error('Routing service returned geometry without a trusted routing provider.');
       writeRouteCache(key, routes);
       void writeStoredRoute(key, from, to, routes);
       return routes;
@@ -438,7 +461,8 @@ export const getRoute = async (from: Location, to: Location): Promise<Route3DHig
   try {
     const directRoutes = await getRouteDirectFromOsrm(from, to);
     if (directRoutes.length) {
-      const routes = rankRoutes(directRoutes);
+      const routes = rankRoutes(filterRealRoutes(directRoutes));
+      if (!routes.length) throw new Error('OSRM returned no trusted route geometry.');
       writeRouteCache(key, routes);
       void writeStoredRoute(key, from, to, routes);
       return routes;
@@ -452,9 +476,15 @@ export const getRoute = async (from: Location, to: Location): Promise<Route3DHig
   // geographically close. This keeps a transient outage from destroying a
   // usable trip while avoiding a wildly stale route for an unrelated trip.
   const nearbyCached = readNearestCachedRoute(from, to);
-  if (nearbyCached) return nearbyCached;
+  if (nearbyCached) {
+    const routes = filterRealRoutes(nearbyCached);
+    if (routes.length) return routes;
+  }
   const persistedNearby = await readStoredRoute(key, ROUTE_CACHE_TTL_MS);
-  if (persistedNearby) return persistedNearby;
+  if (persistedNearby) {
+    const routes = filterRealRoutes(persistedNearby);
+    if (routes.length) return routes;
+  }
 
   const message = backendError instanceof Error ? backendError.message : 'Failed to get route';
   throw new Error(message);
@@ -540,6 +570,7 @@ type PhotonSearchResponse = {
     properties?: {
       name?: string; street?: string; housenumber?: string; postcode?: string;
       city?: string; district?: string; state?: string; country?: string;
+      osm_key?: string; osm_value?: string; type?: string;
     };
   }>;
 };
@@ -564,7 +595,7 @@ const searchPhotonDirect = async (query: string, near?: Location): Promise<Geoco
     for (const value of [p.district, p.city, p.state, p.country, p.postcode]) {
       if (value && !parts.includes(value)) parts.push(value);
     }
-    return [{ display_name: parts.join(', '), location: { lat: coords[1], lng: coords[0] } }];
+    return [{ display_name: parts.join(', '), location: { lat: coords[1], lng: coords[0] }, category: p.osm_value || p.osm_key, type: p.type }];
   });
 };
 

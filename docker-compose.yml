@@ -26,15 +26,17 @@ services:
       - "3001:3001"
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/navigation_app
-      JWT_SECRET: ${JWT_SECRET:-dev-secret-key-change-in-production}
+      # Optional for local development; backend generates a per-process secret if absent.
+      JWT_SECRET: ${JWT_SECRET:-}
       OSRM_URL: ${OSRM_URL:-https://router.project-osrm.org}
       ROUTING_URL: ${ROUTING_URL:-https://router.project-osrm.org}
+      ROUTING_FALLBACK_URL: ${ROUTING_FALLBACK_URL:-}
       TRAFFIC_REFRESH_SECONDS: ${TRAFFIC_REFRESH_SECONDS:-30}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
       ROUTE_CACHE_TTL_SECONDS: ${ROUTE_CACHE_TTL_SECONDS:-30}
-      CONTACT_EMAIL: ${CONTACT_EMAIL:-set-a-real-contact-email@example.com}
+      STREEPT_SCENE_TILES_FILE: ${STREEPT_SCENE_TILES_FILE:-}
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3001/health >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3001/ready >/dev/null 2>&1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -50,6 +52,7 @@ services:
       args:
         VITE_API_URL: ${VITE_API_URL:-/api}
         VITE_WS_URL: ${VITE_WS_URL:-/ws}
+        VITE_SCENE_TILE_URL: ${VITE_SCENE_TILE_URL:-}
     ports:
       - "3000:3000"
     healthcheck:
@@ -60,6 +63,18 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+
+  # Optional self-hosted OSRM stack. Provide a preprocessed .osrm dataset in
+  # ./routing-data before starting with --profile routing. The main app does
+  # not depend on this service, so local development stays lightweight.
+  osrm: 
+    image: osrm/osrm-backend:v5.27.1
+    profiles: ["routing"]
+    command: ["osrm-routed", "--algorithm", "mld", "/data/region.osrm"]
+    volumes:
+      - ./routing-data:/data:ro
+    ports:
+      - "5000:5000"
 
 volumes:
   postgres_data:

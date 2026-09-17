@@ -28,7 +28,13 @@ impl TrafficVehicleStore {
                 entries.remove(&oldest);
             }
         }
-        entries.insert(vehicle.id.clone(), Entry { vehicle, received_at: now });
+        let should_replace = match entries.get(&vehicle.id) {
+            Some(existing) => vehicle.observed_at >= existing.vehicle.observed_at,
+            None => true,
+        };
+        if should_replace {
+            entries.insert(vehicle.id.clone(), Entry { vehicle, received_at: now });
+        }
     }
 
     pub async fn remove(&self, id: &str) -> Option<TrafficVehicle> {

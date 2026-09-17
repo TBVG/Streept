@@ -74,16 +74,13 @@ The frontend will start on `http://localhost:3000`.
   days; changing this secret invalidates all existing sessions.
 - `OSRM_URL`: OSRM routing service URL (Docker default: https://router.project-osrm.org; for local OSRM, set this explicitly)
 - `CORS_ORIGIN`: Allowed CORS origin (default: http://localhost:3000)
-- `CONTACT_EMAIL`: Used to build the User-Agent header for destination-search
-  requests to the Nominatim fallback geocoder. It is not used for normal
-  autocomplete when Photon is available. Set this to a real contact address
-  before production so the fallback identifies the application clearly.
+- Destination autocomplete uses Photon through the backend, with a browser-side Photon fallback if the backend geocoder is unavailable. No `CONTACT_EMAIL` setting is required.
 
 **Frontend (.env):**
 - `VITE_API_URL`: Backend API URL (default: http://localhost:3001/api)
 The frontend is intentionally **keyless**. The default stack uses
 OpenStreetMap for the 2D map, OpenFreeMap for the MapLibre 3D base style,
-Mapterhorn for elevation, Photon/Nominatim for place search, and CesiumJS
+Mapterhorn for elevation, Photon for place search, and CesiumJS
 plus OSM geometry for the immersive turn preview. No map API key or billing
 account is required.
 

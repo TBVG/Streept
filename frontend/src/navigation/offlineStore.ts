@@ -1,6 +1,6 @@
 import { Location, Route3DHighlight, SceneContext } from '../types';
 
-const DB_NAME = 'streept_navigation_v1';
+const DB_NAME = 'streept_navigation_v2';
 const DB_VERSION = 3;
 const ROUTE_STORE = 'routes';
 const SCENE_STORE = 'scenes';

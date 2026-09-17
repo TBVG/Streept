@@ -32,28 +32,43 @@ impl SceneTileStore {
             return Self { tiles: Arc::new(HashMap::new()) };
         };
 
-        let raw = match fs::read_to_string(&path) {
-            Ok(raw) => raw,
-            Err(err) => {
-                tracing::warn!(path = %path.display(), error = %err, "scene tile file unavailable; runtime fallback will be used");
-                return Self { tiles: Arc::new(HashMap::new()) };
+        let mut tiles = HashMap::new();
+        if path.is_dir() {
+            let mut stack = vec![path.clone()];
+            while let Some(dir) = stack.pop() {
+                let entries = match fs::read_dir(&dir) {
+                    Ok(entries) => entries,
+                    Err(err) => { tracing::warn!(path = %dir.display(), error = %err, "scene tile shard directory unavailable"); continue; }
+                };
+                for entry in entries.flatten() {
+                    let child = entry.path();
+                    if child.is_dir() { stack.push(child); continue; }
+                    if child.extension().and_then(|v| v.to_str()) != Some("json") { continue; }
+                    let raw = match fs::read_to_string(&child) { Ok(raw) => raw, Err(_) => continue };
+                    if let Ok(tile) = serde_json::from_str::<SceneTile>(&raw) {
+                        if !tile.id.is_empty() && tile.center_lat.is_finite() && tile.center_lng.is_finite() { tiles.insert(tile.id, tile.scene); }
+                    }
+                }
             }
-        };
-
-        let parsed: Vec<SceneTile> = match serde_json::from_str(&raw) {
-            Ok(value) => value,
-            Err(err) => {
-                tracing::warn!(path = %path.display(), error = %err, "scene tile file invalid; runtime fallback will be used");
-                return Self { tiles: Arc::new(HashMap::new()) };
+        } else {
+            let raw = match fs::read_to_string(&path) {
+                Ok(raw) => raw,
+                Err(err) => {
+                    tracing::warn!(path = %path.display(), error = %err, "scene tile file unavailable; runtime fallback will be used");
+                    return Self { tiles: Arc::new(HashMap::new()) };
+                }
+            };
+            let parsed: Vec<SceneTile> = match serde_json::from_str(&raw) {
+                Ok(value) => value,
+                Err(err) => {
+                    tracing::warn!(path = %path.display(), error = %err, "scene tile file invalid; runtime fallback will be used");
+                    return Self { tiles: Arc::new(HashMap::new()) };
+                }
+            };
+            for tile in parsed {
+                if tile.id.is_empty() || !tile.center_lat.is_finite() || !tile.center_lng.is_finite() { continue; }
+                tiles.insert(tile.id, tile.scene);
             }
-        };
-
-        let mut tiles = HashMap::with_capacity(parsed.len());
-        for tile in parsed {
-            if tile.id.is_empty() || !tile.center_lat.is_finite() || !tile.center_lng.is_finite() {
-                continue;
-            }
-            tiles.insert(tile.id, tile.scene);
         }
         tracing::info!(count = tiles.len(), path = %path.display(), "loaded server-side scene tiles");
         Self { tiles: Arc::new(tiles) }

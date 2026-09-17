@@ -1,0 +1,30 @@
+Streept — Third-Party Notices
+================================
+
+This repository contains or depends on third-party software, data, services,
+and assets that are NOT automatically relicensed under the Streept AGPL.
+Their original licenses and attribution requirements remain applicable.
+
+This file is intentionally a starting-point notice rather than a claim that
+this list is exhaustive. Before a public release, deployment, investment,
+partnership, or acquisition due-diligence process, generate and review a
+complete dependency and asset inventory.
+
+Known project categories include:
+
+- Rust crates from crates.io and their transitive dependencies.
+- npm packages and their transitive dependencies.
+- React, Vite, Leaflet, React-Leaflet, CesiumJS, Axios, TypeScript,
+  Playwright, and related tooling.
+- OpenStreetMap data and services. OpenStreetMap data has its own licensing
+  and attribution requirements and is not covered by the Streept software
+  license.
+- Photon/geocoding and other public routing/geospatial services, each subject
+  to its own terms, usage policies, and data licenses.
+- OSRM and any routing data used by the deployment.
+- Cesium terrain, imagery, 3D assets, and any other external scene data.
+- Fonts, icons, images, map tiles, and other media supplied by third parties.
+
+Do not remove third-party copyright, license, attribution, or NOTICE files.
+When distributing a build, verify the corresponding source and attribution
+requirements for every third-party component included in that build.
