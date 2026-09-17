@@ -216,49 +216,7 @@ For more detailed setup instructions, see:
 
 ---
 
-## 📱 Test Streept on a phone — without publishing an app
 
-Streept is **web-first**, so you do not need the App Store to test it on a phone.
-
-Your computer and phone can be connected to the same Wi-Fi network. Run Streept on the computer, find the computer's local IP address, and open the Streept frontend from the phone using that address and port `3000`.
-
-For example:
-
-```text
-http://192.168.1.25:3000
-```
-
-This lets you test the actual mobile browser experience, including:
-
-- touch interaction
-- responsive layouts
-- GPS permissions
-- navigation UI
-- portrait/landscape behavior
-- 3D performance
-- offline behavior
-
-No App Store listing is required.
-
----
-
-## 💸 The $0 deployment goal
-
-The immediate deployment target is a **public Streept website that can be operated using free tiers**, rather than requiring paid infrastructure from day one.
-
-The intended architecture is:
-
-```text
-User's browser
-      ↓
-Free static web hosting
-      ↓
-Rust API / backend
-      ↓
-PostgreSQL + PostGIS
-      ↓
-Routing / map / spatial data
-```
 
 The project is being kept provider-neutral so that free-tier services can be used while Streept is small, with self-hosted alternatives available as the project grows.
 
@@ -318,42 +276,5 @@ Before a public commercial launch, perform a final third-party asset, map-data, 
 
 ---
 
-## 🧪 Project status
 
-**Current milestone: Phase 8 — web-first production expansion.**
 
-The current codebase contains the core navigation and spatial product architecture, including the 2D navigation experience, immersive 3D navigation, lane/junction intelligence, community intelligence, offline-aware state, on-device learning, self-hostable routing infrastructure, and scalable scene-tile infrastructure.
-
-The next major goal is not an App Store release.
-
-It is:
-
-> **Get Streept running reliably as a publicly accessible website and prove the complete experience on real phones and real networks.**
-
-Some production inputs remain external to the codebase, including regional routing datasets, large-scale 3D scene data, real traffic-provider feeds, and eventual production-scale infrastructure.
-
----
-
-## 🛣️ Road ahead
-
-The project is being developed in stages:
-
-1. **Web product** — make Streept reliably usable in a browser.
-2. **Public deployment** — operate the first version using free-tier infrastructure where practical.
-3. **Real-world testing** — test navigation on phones and real roads.
-4. **Spatial intelligence** — continue improving lane, junction, scene, and road-context reasoning.
-5. **Data and learning** — improve privacy-conscious road intelligence using real observations.
-6. **Scale** — move toward self-hosted routing, richer scene data, stronger offline support, and production infrastructure as usage requires.
-7. **Native platforms** — iOS, Android, CarPlay and other platform integrations are future expansion tracks, not requirements for the web product.
-
----
-
-## 🤝 Contributing
-
-See `CONTRIBUTING.md` for contribution and licensing information.
-
----
-
-## 📌 In one sentence
-
-**Streept is a web-first navigation platform that combines turn-by-turn routing with lane intelligence, community road knowledge, predictive spatial context, and an automatically triggered first-person 3D view to help drivers understand the road ahead.**
