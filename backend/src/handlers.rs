@@ -588,7 +588,7 @@ pub async fn get_parking(
         WHERE ST_DWithin(
             location::geography,
             ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography,
-            1000
+            2000
         )
         ORDER BY ST_Distance(
             location::geography,
@@ -728,16 +728,16 @@ pub async fn checkin_parking(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let mut previous_lot_id: Option<String> = None;
-    if let Some(row) = previous {
-        let lot_id: String = row.get("lot_id");
+    let previous_lot_id = previous.as_ref().map(|row| row.get::<String, _>("lot_id"));
+    let was_already_in_requested_lot = previous_lot_id.as_deref() == Some(req.lot_id.as_str());
+
+    if let Some(lot_id) = previous_lot_id.as_deref() {
         if lot_id != req.lot_id {
             sqlx::query("UPDATE parking_spaces SET occupied_spaces = GREATEST(0, occupied_spaces - 1) WHERE id = $1")
                 .bind(&lot_id)
                 .execute(&mut *tx)
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            previous_lot_id = Some(lot_id);
         }
     }
 
@@ -763,18 +763,11 @@ pub async fn checkin_parking(
         }))));
     }
 
-    // Only increment if this is a genuinely new check-in to this lot (not
-    // just a repeat heartbeat for a lot they're already checked into).
-    let was_already_here = previous_lot_id.is_none()
-        && sqlx::query("SELECT 1 FROM parking_occupancy WHERE user_id = $1 AND lot_id = $2 AND checked_in_at < NOW() - INTERVAL '1 second'")
-            .bind(&auth_user.id)
-            .bind(&req.lot_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-            .is_some();
-
-    if !was_already_here {
+    // Only increment for a genuinely new occupancy. A repeat check-in to the
+    // same lot is an idempotent heartbeat and must not increase the count.
+    // A switch to a different lot was already decremented above, so that new
+    // lot needs exactly one increment.
+    if !was_already_in_requested_lot {
         sqlx::query("UPDATE parking_spaces SET occupied_spaces = occupied_spaces + 1 WHERE id = $1")
             .bind(&req.lot_id)
             .execute(&mut *tx)
@@ -1748,9 +1741,8 @@ pub async fn purchase_billboard(
 
     // Purchase the billboard. click_count resets to 0 — it tracks
     // engagement for the current booking, not the billboard's lifetime.
-    // In the free beta, submissions go live immediately so the team can
-    // test the advertising experience end-to-end. Paid billing and a more
-    // sophisticated moderation workflow can be layered on later.
+    // Purchases enter moderation as pending; they become publicly active only
+    // after an administrator explicitly approves them.
     let update_query = r#"
         UPDATE billboards
         SET is_purchased = true,
@@ -1760,7 +1752,7 @@ pub async fn purchase_billboard(
             display_start = $4,
             display_end = $5,
             click_count = 0,
-            moderation_status = 'approved'
+            moderation_status = 'pending'
         WHERE id = $6
         RETURNING id, ST_Y(location::geometry) as lat, ST_X(location::geometry) as lng, is_purchased, purchased_by, ad_image_url, ad_target_url, display_start, display_end, click_count, moderation_status
     "#;
