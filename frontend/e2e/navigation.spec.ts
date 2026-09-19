@@ -78,8 +78,8 @@ test('real browser smoke: search -> route preview -> navigation', async ({ page 
   const destinationInput = page.getByPlaceholder('Search for a destination…');
   await expect(destinationInput).toBeVisible();
   await destinationInput.fill('Test Destination');
-  await expect(page.getByRole('button', { name: /Test Destination, Streept/ })).toBeVisible();
-  await page.getByRole('button', { name: /Test Destination, Streept/ }).click();
+  await expect(page.getByRole('button', { name: /Test Destination/ })).toBeVisible();
+  await page.getByRole('button', { name: /Test Destination/ }).click();
 
   await expect(page.getByText('TRIP PREVIEW')).toBeVisible();
   const startButton = page.getByRole('button', { name: /Enter navigation/ });
@@ -103,7 +103,7 @@ test('real browser smoke: search -> route preview -> navigation', async ({ page 
 test('GPS simulation drives the same navigation path used by the browser', async ({ page }) => {
   await page.goto('/');
   await page.getByPlaceholder('Search for a destination…').fill('Test Destination');
-  await page.getByRole('button', { name: /Test Destination, Streept/ }).click();
+  await page.getByRole('button', { name: /Test Destination/ }).click();
   await expect(page.getByRole('button', { name: /Enter navigation/ })).toBeEnabled();
   await page.getByRole('button', { name: /Enter navigation/ }).click();
 
