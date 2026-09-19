@@ -7,6 +7,10 @@ export default defineConfig({
   reporter: process.env.CI ? 'github' : 'list',
   use: {
     baseURL: 'http://127.0.0.1:4173',
+    // E2E tests stub the /api surface in the browser. Block the production
+    // service worker so its fetch handler cannot bypass Playwright's route
+    // interception and fall through to the unavailable CI backend.
+    serviceWorkers: 'block',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
