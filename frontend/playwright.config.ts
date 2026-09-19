@@ -16,10 +16,22 @@ export default defineConfig({
     video: 'retain-on-failure',
     ...devices['Desktop Chrome'],
   },
-  webServer: {
-    command: 'npm run build && npm run preview -- --host 127.0.0.1 --port 4173',
-    url: 'http://127.0.0.1:4173',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  webServer: [
+    {
+      command: 'node e2e/mock-api-server.mjs',
+      url: 'http://127.0.0.1:3001/ready',
+      reuseExistingServer: !process.env.CI,
+      timeout: 30_000,
+    },
+    {
+      command: 'npm run build && npm run preview -- --host 127.0.0.1 --port 4173',
+      url: 'http://127.0.0.1:4173',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+      env: {
+        VITE_API_URL: 'http://127.0.0.1:3001/api',
+        VITE_WS_URL: 'ws://127.0.0.1:3001/api/ws',
+      },
+    },
+  ],
 });

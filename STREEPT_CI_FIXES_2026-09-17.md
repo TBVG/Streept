@@ -24,3 +24,7 @@ This update resolves the frontend and backend CI failures found after the Phase 
 - Removed the `$0 deployment goal` section from the product README.
 
 The project remains web-first; this change does not add App Store/native-platform requirements.
+
+## E2E API isolation fix — 2026-09-19
+
+GitHub Playwright was starting the frontend without a reachable backend, so browser API requests were falling through to the Vite proxy and producing `ECONNREFUSED`. The E2E suite now starts a deterministic local mock API on `127.0.0.1:3001` and launches the production preview with `VITE_API_URL` / `VITE_WS_URL` pointed at that mock service. The existing browser-level API interception remains in place, so the tests do not depend on external geocoding, OSRM, PostgreSQL, or a live Rust backend.
