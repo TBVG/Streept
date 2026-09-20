@@ -58,6 +58,15 @@ async function mockStreeptApi(page: Page) {
   await page.route('https://photon.komoot.io/**', route => route.abort());
 }
 
+async function prepareNavigationPage(page: Page, context: import('@playwright/test').BrowserContext) {
+  await page.goto('/');
+  // Chromium can register watchPosition before the pre-navigation geolocation
+  // fix is delivered. Re-apply the same browser-level location after the page
+  // is live so the production watcher receives a real position update.
+  await context.setGeolocation({ latitude: ORIGIN.lat, longitude: ORIGIN.lng, accuracy: 5 });
+  await expect(page.getByRole('button', { name: 'Center on my location' })).toBeEnabled({ timeout: 10000 });
+}
+
 async function setGps(page: Page, lat: number, lng: number) {
   await page.context().setGeolocation({ latitude: lat, longitude: lng, accuracy: 5 });
   // Playwright's browser-level geolocation provider delivers this new fix to
@@ -73,7 +82,7 @@ test.beforeEach(async ({ page, context }) => {
 });
 
 test('real browser smoke: search -> route preview -> navigation', async ({ page }) => {
-  await page.goto('/');
+  await prepareNavigationPage(page, page.context());
 
   const destinationInput = page.getByPlaceholder('Search for a destination…');
   await expect(destinationInput).toBeVisible();
@@ -81,7 +90,7 @@ test('real browser smoke: search -> route preview -> navigation', async ({ page 
   await expect(page.getByRole('button', { name: /Test Destination/ })).toBeVisible();
   await page.getByRole('button', { name: /Test Destination/ }).click();
 
-  await expect(page.getByText('TRIP PREVIEW')).toBeVisible();
+  await expect(page.getByText('TRIP PREVIEW')).toBeVisible({ timeout: 10000 });
   const startButton = page.getByRole('button', { name: /Enter navigation/ });
   await expect(startButton).toBeVisible();
   await expect(startButton).toBeEnabled();
@@ -101,10 +110,10 @@ test('real browser smoke: search -> route preview -> navigation', async ({ page 
 });
 
 test('GPS simulation drives the same navigation path used by the browser', async ({ page }) => {
-  await page.goto('/');
+  await prepareNavigationPage(page, page.context());
   await page.getByPlaceholder('Search for a destination…').fill('Test Destination');
   await page.getByRole('button', { name: /Test Destination/ }).click();
-  await expect(page.getByRole('button', { name: /Enter navigation/ })).toBeEnabled();
+  await expect(page.getByRole('button', { name: /Enter navigation/ })).toBeEnabled({ timeout: 10000 });
   await page.getByRole('button', { name: /Enter navigation/ }).click();
 
   // Move along the exact route geometry. This exercises the production
