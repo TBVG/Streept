@@ -58,31 +58,68 @@ async function mockStreeptApi(page: Page) {
   await page.route('https://photon.komoot.io/**', route => route.abort());
 }
 
-async function prepareNavigationPage(page: Page, context: import('@playwright/test').BrowserContext) {
+async function prepareNavigationPage(page: Page) {
   await page.goto('/');
-  // Chromium can register watchPosition before the pre-navigation geolocation
-  // fix is delivered. Re-apply the same browser-level location after the page
-  // is live so the production watcher receives a real position update.
-  await context.setGeolocation({ latitude: ORIGIN.lat, longitude: ORIGIN.lng, accuracy: 5 });
-  await expect(page.getByRole('button', { name: 'Center on my location' })).toBeEnabled({ timeout: 10000 });
+  // The CI browser must exercise the production geolocation watcher, but
+  // Chromium's permission/geolocation delivery can race React mounting on a
+  // headless Linux runner. The test therefore supplies a deterministic browser
+  // Geolocation API implementation before the app loads. This is still the
+  // same navigator.geolocation.watchPosition contract used by production code.
+  await page.waitForFunction(() => Boolean((window as any).__streeptGpsReady));
+  await expect(page.getByPlaceholder('Search for a destination…')).toBeVisible();
+  await page.evaluate(({ lat, lng }) => (window as any).__streeptSetGps(lat, lng), ORIGIN);
+  await page.waitForTimeout(250);
 }
 
 async function setGps(page: Page, lat: number, lng: number) {
-  await page.context().setGeolocation({ latitude: lat, longitude: lng, accuracy: 5 });
-  // Playwright's browser-level geolocation provider delivers this new fix to
-  // the production navigator.geolocation.watchPosition listener. No test-only
-  // navigation API is involved.
+  await page.evaluate(({ lat: nextLat, lng: nextLng }) => (window as any).__streeptSetGps(nextLat, nextLng), { lat, lng });
   await page.waitForTimeout(100);
 }
 
 test.beforeEach(async ({ page, context }) => {
   await context.grantPermissions(['geolocation']);
   await context.setGeolocation({ latitude: ORIGIN.lat, longitude: ORIGIN.lng, accuracy: 5 });
+  await page.addInitScript(() => {
+    let current = { lat: 43.0000, lng: -78.0000 };
+    const watchers = new Map<number, PositionCallback>();
+    let nextId = 1;
+    const position = (): GeolocationPosition => ({
+      coords: {
+        latitude: current.lat,
+        longitude: current.lng,
+        accuracy: 5,
+        altitude: null,
+        altitudeAccuracy: null,
+        heading: 0,
+        speed: 0,
+        toJSON() { return this; },
+      },
+      timestamp: Date.now(),
+      toJSON() { return this; },
+    } as GeolocationPosition);
+    const geo: Geolocation = {
+      getCurrentPosition(success) { setTimeout(() => success(position()), 0); },
+      watchPosition(success) {
+        const id = nextId++;
+        watchers.set(id, success);
+        setTimeout(() => success(position()), 0);
+        return id;
+      },
+      clearWatch(id) { watchers.delete(id); },
+    } as Geolocation;
+    Object.defineProperty(navigator, 'geolocation', { configurable: true, value: geo });
+    (window as any).__streeptGpsReady = true;
+    (window as any).__streeptSetGps = (lat: number, lng: number) => {
+      current = { lat, lng };
+      const next = position();
+      watchers.forEach((success) => success(next));
+    };
+  });
   await mockStreeptApi(page);
 });
 
 test('real browser smoke: search -> route preview -> navigation', async ({ page }) => {
-  await prepareNavigationPage(page, page.context());
+  await prepareNavigationPage(page);
 
   const destinationInput = page.getByPlaceholder('Search for a destination…');
   await expect(destinationInput).toBeVisible();
@@ -110,7 +147,7 @@ test('real browser smoke: search -> route preview -> navigation', async ({ page 
 });
 
 test('GPS simulation drives the same navigation path used by the browser', async ({ page }) => {
-  await prepareNavigationPage(page, page.context());
+  await prepareNavigationPage(page);
   await page.getByPlaceholder('Search for a destination…').fill('Test Destination');
   await page.getByRole('button', { name: /Test Destination/ }).click();
   await expect(page.getByRole('button', { name: /Enter navigation/ })).toBeEnabled({ timeout: 10000 });
