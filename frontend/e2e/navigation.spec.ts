@@ -128,8 +128,12 @@ test('real browser smoke: search -> route preview -> navigation', async ({ page 
   await page.getByRole('button', { name: /Test Destination/ }).click();
 
   await expect(page.getByText('TRIP PREVIEW')).toBeVisible({ timeout: 10000 });
+  // TRIP PREVIEW is mounted before routing finishes. Wait for the production
+  // route-loading state to settle instead of assuming the Start button exists
+  // immediately after the preview card appears.
+  await expect(page.getByText('Ready to go')).toBeVisible({ timeout: 30000 });
   const startButton = page.getByRole('button', { name: /Enter navigation/ });
-  await expect(startButton).toBeVisible();
+  await expect(startButton).toBeVisible({ timeout: 10000 });
   await expect(startButton).toBeEnabled();
 
   const card = page.locator('.start-navigation-card');
@@ -150,6 +154,8 @@ test('GPS simulation drives the same navigation path used by the browser', async
   await prepareNavigationPage(page);
   await page.getByPlaceholder('Search for a destination…').fill('Test Destination');
   await page.getByRole('button', { name: /Test Destination/ }).click();
+  await expect(page.getByText('TRIP PREVIEW')).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText('Ready to go')).toBeVisible({ timeout: 30000 });
   await expect(page.getByRole('button', { name: /Enter navigation/ })).toBeEnabled({ timeout: 10000 });
   await page.getByRole('button', { name: /Enter navigation/ }).click();
 
