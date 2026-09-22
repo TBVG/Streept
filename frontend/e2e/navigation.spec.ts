@@ -3,57 +3,10 @@ import { test, expect, type Page } from '@playwright/test';
 const ORIGIN = { lat: 43.0000, lng: -78.0000 };
 const DESTINATION = { lat: 43.0018, lng: -78.0000 };
 
-const routeFixture = {
-  provider: 'osrm',
-  duration_seconds: 120,
-  distance_meters: 1800,
-  segments: [{
-    coords: [
-      { lat: 43.0000, lng: -78.0000, alt: 0 },
-      { lat: 43.0007, lng: -78.0000, alt: 0 },
-      { lat: 43.0012, lng: -78.0000, alt: 0 },
-      { lat: 43.0018, lng: -78.0000, alt: 0 },
-    ],
-    is_highlighted: true,
-    color: '#2D7FF9',
-    lane_index: null,
-  }],
-  maneuvers: [{
-    type: 'arrive',
-    modifier: null,
-    location: DESTINATION,
-    bearing_before: 0,
-    instruction: 'Arrive at destination',
-    is_complex: false,
-  }],
-};
-
-async function mockStreeptApi(page: Page) {
-  await page.route('**/api/**', async (route) => {
-    const url = new URL(route.request().url());
-    if (url.pathname.endsWith('/geocode')) {
-      return route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true, data: [{
-          display_name: 'Test Destination, Streept',
-          location: DESTINATION,
-        }] }),
-      });
-    }
-    if (url.pathname.endsWith('/route')) {
-      return route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true, data: { routes: [routeFixture] } }),
-      });
-    }
-    if (url.pathname.endsWith('/parking') || url.pathname.endsWith('/parked-cars') || url.pathname.endsWith('/reports') || url.pathname.endsWith('/billboards') || url.pathname.endsWith('/traffic') || url.pathname.endsWith('/traffic/vehicles')) {
-      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [] }) });
-    }
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: [] }) });
-  });
-
+async function mockExternalProviders(page: Page) {
+  // The E2E web server provides the complete /api contract on localhost:3001.
+  // Only block the real public routing/geocoding providers so a browser test
+  // can never escape the deterministic fixture environment.
   await page.route('https://router.project-osrm.org/**', route => route.abort());
   await page.route('https://photon.komoot.io/**', route => route.abort());
 }
@@ -115,7 +68,7 @@ test.beforeEach(async ({ page, context }) => {
       watchers.forEach((success) => success(next));
     };
   });
-  await mockStreeptApi(page);
+  await mockExternalProviders(page);
 });
 
 test('real browser smoke: search -> route preview -> navigation', async ({ page }) => {
@@ -128,13 +81,13 @@ test('real browser smoke: search -> route preview -> navigation', async ({ page 
   await page.getByRole('button', { name: /Test Destination/ }).click();
 
   await expect(page.getByText('TRIP PREVIEW')).toBeVisible({ timeout: 10000 });
-  // TRIP PREVIEW is mounted before routing finishes. Wait for the production
-  // route-loading state to settle instead of assuming the Start button exists
-  // immediately after the preview card appears.
-  await expect(page.getByText('Ready to go')).toBeVisible({ timeout: 30000 });
+  // The local E2E mock server owns the /api contract. Waiting for the actual
+  // route response makes this test fail at the network/application boundary
+  // instead of masking a routing problem as a missing UI label.
+  await expect.poll(async () => await page.locator('.start-navigation-button').getAttribute('disabled'), { timeout: 30000 }).toBeNull();
   const startButton = page.getByRole('button', { name: /Enter navigation/ });
-  await expect(startButton).toBeVisible({ timeout: 10000 });
-  await expect(startButton).toBeEnabled();
+  await expect(startButton).toBeVisible({ timeout: 30000 });
+  await expect(startButton).toBeEnabled({ timeout: 30000 });
 
   const card = page.locator('.start-navigation-card');
   const cardBox = await card.boundingBox();
@@ -155,9 +108,11 @@ test('GPS simulation drives the same navigation path used by the browser', async
   await page.getByPlaceholder('Search for a destination…').fill('Test Destination');
   await page.getByRole('button', { name: /Test Destination/ }).click();
   await expect(page.getByText('TRIP PREVIEW')).toBeVisible({ timeout: 10000 });
-  await expect(page.getByText('Ready to go')).toBeVisible({ timeout: 30000 });
-  await expect(page.getByRole('button', { name: /Enter navigation/ })).toBeEnabled({ timeout: 10000 });
-  await page.getByRole('button', { name: /Enter navigation/ }).click();
+  await expect.poll(async () => await page.locator('.start-navigation-button').getAttribute('disabled'), { timeout: 30000 }).toBeNull();
+  const startButton = page.getByRole('button', { name: /Enter navigation/ });
+  await expect(startButton).toBeVisible({ timeout: 30000 });
+  await expect(startButton).toBeEnabled({ timeout: 30000 });
+  await startButton.click();
 
   // Move along the exact route geometry. This exercises the production
   // geolocation watcher, smoothing, route matching and navigation state.

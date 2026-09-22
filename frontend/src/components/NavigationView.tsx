@@ -524,16 +524,45 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
   // route preview; after they press Start, live GPS takes over the turn-by-turn
   // tracking even when a custom starting point was entered.
   const routeOrigin = customStart ?? userLocation;
+  const lastPreviewRouteRef = useRef<{ origin: Location; destination: Location; customStart: boolean } | null>(null);
 
   useEffect(() => {
     // Trip planning owns automatic route generation. Once navigation has
     // started, route changes happen only through explicit rerouting from the
-    // live GPS position; this prevents a stale customStart value from
-    // rebuilding the preview route underneath an active trip.
-    if (!navigationStarted && routeOrigin && destination) {
-      loadRoute(routeOrigin, destination, false);
-    }
-  }, [routeOrigin, destination, navigationStarted]);
+    // live GPS position. Before navigation starts, live GPS can update several
+    // times per second on real devices, so do not rebuild the same preview for
+    // every object-shaped GPS state update. Rebuild only when the destination
+    // changes, a custom start is selected/changed, or the live origin has moved
+    // a meaningful distance. This also keeps routeLoading from being reset
+    // continuously while a route request is settling.
+    if (navigationStarted || !routeOrigin || !destination) return;
+
+    const previous = lastPreviewRouteRef.current;
+    const destinationChanged = !previous
+      || previous.destination.lat !== destination.lat
+      || previous.destination.lng !== destination.lng;
+    const customStartChanged = !previous
+      || previous.customStart !== Boolean(customStart);
+    const originMoved = !previous
+      || haversineDistanceMeters(previous.origin, routeOrigin) >= 25;
+
+    if (!destinationChanged && !customStartChanged && !originMoved) return;
+
+    lastPreviewRouteRef.current = {
+      origin: routeOrigin,
+      destination,
+      customStart: Boolean(customStart),
+    };
+    void loadRoute(routeOrigin, destination, false);
+  }, [
+    customStart?.lat,
+    customStart?.lng,
+    userLocation?.lat,
+    userLocation?.lng,
+    destination?.lat,
+    destination?.lng,
+    navigationStarted,
+  ]);
 
   useEffect(() => {
     const session = readNavigationSession();
@@ -1444,6 +1473,7 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
       navigationSessionRef.current = false;
       dispatchNavigation({ type: 'PLAN' });
     }
+
     try {
       let routes: Route3DHighlight[] = [];
       try {
@@ -1457,6 +1487,7 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
           throw networkError;
         }
       }
+
       // Ignore an older response that arrived after a newer route request.
       if (requestId !== routeRequestIdRef.current) return;
       if (!routes || routes.length === 0) {
@@ -1466,32 +1497,33 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
         setRouteError('No drivable route was found between these locations.');
         return;
       }
+
+      // Commit the real routing result to the UI immediately. Community
+      // intelligence, offline persistence, and map-tile caching are useful
+      // enrichments, but none of them should keep the core route in a
+      // "Building route…" state. This is especially important on slower
+      // devices and makes the Start button reflect the actual routing result
+      // rather than the completion of unrelated background work.
       const fallbackRankedRoutes = rankRoutesWithRisk(routes, [...reports, ...liveTraffic]);
-      let rankedRoutes = fallbackRankedRoutes;
-      let rankedProfiles: RouteDecisionProfile[] = [];
-      try {
-        const wayIds = Array.from(new Set(routes.flatMap((candidate) =>
-          buildRouteDecisionProfiles([candidate], [], sceneContext, new Map())[0].wayIds
-        ))).slice(0, 128);
-        const communityItems = wayIds.length ? await getRoadIntelligenceBatch(wayIds, 30) : [];
-        if (requestId !== routeRequestIdRef.current) return;
-        const community = new Map(communityItems.map((item) => [item.way_id, item]));
-        setRouteCommunityIntelligence(community);
-        const profiles = buildRouteDecisionProfiles(routes, [...reports, ...liveTraffic], sceneContext, community);
-        const order = rankRoutesBySpatialIntelligence(profiles);
-        rankedRoutes = order.map((index) => routes[index]);
-        rankedProfiles = order.map((index) => profiles[index]);
-      } catch {
-        // Route selection remains fully functional when community intelligence is unavailable.
-        setRouteCommunityIntelligence(new Map());
-      }
-      setRouteOptions(rankedRoutes);
-      setRouteDecisionProfiles(rankedProfiles.length ? rankedProfiles : rankedRoutes.map((candidate) => buildRouteDecisionProfiles([candidate], [...reports, ...liveTraffic], sceneContext, new Map())[0]));
+      const fallbackProfiles = fallbackRankedRoutes.map((candidate) =>
+        buildRouteDecisionProfiles([candidate], [...reports, ...liveTraffic], sceneContext, new Map())[0]
+      );
+
+      setRouteOptions(fallbackRankedRoutes);
+      setRouteDecisionProfiles(fallbackProfiles);
       setSelectedRouteIndex(0);
-      void writeOfflineTrip(from, to, rankedRoutes, {});
-      void cacheRouteMapTiles(rankedRoutes[0]?.segments.flatMap((segment) => segment.coords.map((coord) => ({ lat: coord.lat, lng: coord.lng }))) ?? []);
       setManeuverIndex(0);
       setActiveManeuver(null);
+
+      // The route is ready for the user now. Do not wait for optional
+      // intelligence calls before enabling "Enter navigation".
+      setRouteLoading(false);
+
+      void writeOfflineTrip(from, to, fallbackRankedRoutes, {});
+      void cacheRouteMapTiles(fallbackRankedRoutes[0]?.segments.flatMap((segment) =>
+        segment.coords.map((coord) => ({ lat: coord.lat, lng: coord.lng }))
+      ) ?? []);
+
       if (keepSession) {
         navigationSessionRef.current = true;
         // A successful reroute resumes the existing session; it must not be
@@ -1501,11 +1533,47 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
           ? { type: 'REROUTE_SUCCEEDED' }
           : { type: 'START', hasRoute: true });
       }
+
+      // Enrich the already-visible route in the background. If the driver has
+      // started navigation before this finishes, leave the active route alone
+      // rather than swapping route geometry underneath the driver.
+      void (async () => {
+        try {
+          const wayIds = Array.from(new Set(routes.flatMap((candidate) =>
+            buildRouteDecisionProfiles([candidate], [], sceneContext, new Map())[0].wayIds
+          ))).slice(0, 128);
+          if (!wayIds.length) return;
+
+          const communityItems = await getRoadIntelligenceBatch(wayIds, 30);
+          if (requestId !== routeRequestIdRef.current || navigationSessionRef.current) return;
+
+          const community = new Map(communityItems.map((item) => [item.way_id, item]));
+          setRouteCommunityIntelligence(community);
+          const profiles = buildRouteDecisionProfiles(routes, [...reports, ...liveTraffic], sceneContext, community);
+          const order = rankRoutesBySpatialIntelligence(profiles);
+          const enrichedRoutes = order.map((index) => routes[index]);
+          const enrichedProfiles = order.map((index) => profiles[index]);
+
+          if (requestId !== routeRequestIdRef.current || navigationSessionRef.current) return;
+          setRouteOptions(enrichedRoutes);
+          setRouteDecisionProfiles(enrichedProfiles);
+          setSelectedRouteIndex(0);
+        } catch {
+          // Community intelligence is optional. The already-committed route
+          // remains fully usable when this enrichment is unavailable.
+          setRouteCommunityIntelligence(new Map());
+        }
+      })();
     } catch (error) {
       if (requestId !== routeRequestIdRef.current) return;
       console.error('Error loading route:', error);
-      if (!keepSession) { setRouteOptions([]); setRouteDecisionProfiles([]); setRouteCommunityIntelligence(new Map()); }
-      else dispatchNavigation({ type: 'REROUTE_FAILED' });
+      if (!keepSession) {
+        setRouteOptions([]);
+        setRouteDecisionProfiles([]);
+        setRouteCommunityIntelligence(new Map());
+      } else {
+        dispatchNavigation({ type: 'REROUTE_FAILED' });
+      }
       setRouteError(error instanceof Error ? error.message : 'We could not build this route. Check the locations and try again.');
     } finally {
       if (requestId === routeRequestIdRef.current) setRouteLoading(false);
