@@ -3,10 +3,62 @@ import { test, expect, type Page } from '@playwright/test';
 const ORIGIN = { lat: 43.0000, lng: -78.0000 };
 const DESTINATION = { lat: 43.0018, lng: -78.0000 };
 
+const ROUTE_FIXTURE = {
+  provider: 'osrm',
+  duration_seconds: 120,
+  distance_meters: 1800,
+  segments: [{
+    coords: [
+      { lat: ORIGIN.lat, lng: ORIGIN.lng, alt: 0 },
+      { lat: 43.0007, lng: -78.0000, alt: 0 },
+      { lat: 43.0012, lng: -78.0000, alt: 0 },
+      { lat: DESTINATION.lat, lng: DESTINATION.lng, alt: 0 },
+    ],
+    is_highlighted: true,
+    color: '#2D7FF9',
+    lane_index: null,
+  }],
+  maneuvers: [{
+    type: 'arrive',
+    modifier: null,
+    location: DESTINATION,
+    bearing_before: 0,
+    instruction: 'Arrive at destination',
+    is_complex: false,
+  }],
+};
+
 async function mockExternalProviders(page: Page) {
-  // The E2E web server provides the complete /api contract on localhost:3001.
-  // Only block the real public routing/geocoding providers so a browser test
-  // can never escape the deterministic fixture environment.
+  // Keep the browser test deterministic at the application boundary. The
+  // production app normally talks to the configured backend, but GitHub's
+  // E2E job intentionally has no real routing backend. Intercept the route
+  // and geocode contracts in the browser so the test proves the real React
+  // route-preview/navigation flow instead of depending on a second process
+  // being reachable from Chromium.
+  await page.route('**/api/geocode*', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        success: true,
+        data: [{ display_name: 'Test Destination, Streept', location: DESTINATION }],
+      }),
+    });
+  });
+  await page.route('**/api/route*', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, data: { routes: [ROUTE_FIXTURE] } }),
+    });
+  });
+  await page.route('**/api/road-intelligence/**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, data: [] }),
+    });
+  });
   await page.route('https://router.project-osrm.org/**', route => route.abort());
   await page.route('https://photon.komoot.io/**', route => route.abort());
 }
