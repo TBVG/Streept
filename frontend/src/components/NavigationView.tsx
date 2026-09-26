@@ -227,8 +227,6 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
   // dropping an active navigation session back into trip-preview mode.
   const navigationSessionRef = useRef(false);
   const routeRequestIdRef = useRef(0);
-  const routeInFlightKeyRef = useRef<string | null>(null);
-  const routeCommittedKeyRef = useRef<string | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
   const [nearbyLoading, setNearbyLoading] = useState(false);
@@ -529,15 +527,13 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
   const lastPreviewRouteRef = useRef<{ origin: Location; destination: Location; customStart: boolean } | null>(null);
 
   useEffect(() => {
-    // Trip planning owns automatic route generation. Once navigation has
-    // started, route changes happen only through explicit rerouting from the
-    // live GPS position. Before navigation starts, live GPS can update several
-    // times per second on real devices, so do not rebuild the same preview for
-    // every object-shaped GPS state update. Rebuild only when the destination
-    // changes, a custom start is selected/changed, or the live origin has moved
-    // a meaningful distance. This also keeps routeLoading from being reset
-    // continuously while a route request is settling.
+    // Preview routing is deliberately destination-driven. Once a preview route
+    // has been requested/committed, ordinary GPS movement must not start a
+    // second preview request: that race can leave an otherwise valid preview
+    // disabled when a later request fails or resolves out of order. Live GPS
+    // rerouting belongs to the active navigation session below.
     if (navigationStarted || !routeOrigin || !destination) return;
+    if (routeOptions.length > 0) return;
 
     const previous = lastPreviewRouteRef.current;
     const destinationChanged = !previous
@@ -545,18 +541,11 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
       || previous.destination.lng !== destination.lng;
     const customStartChanged = !previous
       || previous.customStart !== Boolean(customStart);
-    const originMoved = !previous
-      || haversineDistanceMeters(previous.origin, routeOrigin) >= 25;
 
-    if (!destinationChanged && !customStartChanged && !originMoved) return;
-
-    const previewKey = `${routeOrigin.lat.toFixed(5)},${routeOrigin.lng.toFixed(5)}>${destination.lat.toFixed(5)},${destination.lng.toFixed(5)}`;
-    // React can deliver several equivalent GPS updates while the destination
-    // selection is settling. Never start a second request for the exact same
-    // preview while the first one is still in flight. A duplicate request can
-    // otherwise keep routeLoading true after the first request has already
-    // produced a perfectly usable route.
-    if (routeInFlightKeyRef.current === previewKey || routeCommittedKeyRef.current === previewKey) return;
+    // If the route failed while the origin was temporarily unavailable, allow
+    // the first real origin to trigger a request. After that, do not use GPS
+    // jitter as a route-preview trigger.
+    if (!destinationChanged && !customStartChanged && previous) return;
 
     lastPreviewRouteRef.current = {
       origin: routeOrigin,
@@ -572,6 +561,7 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
     destination?.lat,
     destination?.lng,
     navigationStarted,
+    routeOptions.length,
   ]);
 
   useEffect(() => {
@@ -1230,15 +1220,17 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
     // destination while the user is still editing the trip.
     navigationSessionRef.current = false;
     clearNavigationSession();
+    routeRequestIdRef.current += 1;
+    lastPreviewRouteRef.current = null;
+    setRouteOptions([]);
+    setRouteDecisionProfiles([]);
+    setRouteCommunityIntelligence(new Map());
+    setRouteError(null);
+    setRouteLoading(false);
     dispatchNavigation({ type: 'PLAN' });
     setSplitView(false);
     setActiveManeuver(null);
     setManeuverIndex(0);
-    lastPreviewRouteRef.current = null;
-    routeCommittedKeyRef.current = null;
-    routeInFlightKeyRef.current = null;
-    setRouteLoading(false);
-    setRouteError(null);
     setDestination(result.location);
     setSearchQuery(result.display_name);
     setShowSearchResults(false);
@@ -1480,18 +1472,9 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
   }, [userLocation?.lat, userLocation?.lng, isOnline]);
 
   const loadRoute = async (from: Location, to: Location, preserveNavigation = false) => {
-    const requestKey = `${from.lat.toFixed(5)},${from.lng.toFixed(5)}>${to.lat.toFixed(5)},${to.lng.toFixed(5)}`;
-    if (routeInFlightKeyRef.current === requestKey) return;
-
     const requestId = ++routeRequestIdRef.current;
     const keepSession = preserveNavigation || navigationSessionRef.current;
-    routeInFlightKeyRef.current = requestKey;
-
-    // An already committed route is a usable preview. Background reroutes must
-    // not make the primary action look disabled while a replacement route is
-    // being fetched. The first route request, when no route exists yet, still
-    // shows the normal loading state.
-    if (routeOptions.length === 0) setRouteLoading(true);
+    setRouteLoading(true);
     setRouteError(null);
     if (!keepSession) {
       navigationSessionRef.current = false;
@@ -1538,7 +1521,6 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
       setSelectedRouteIndex(0);
       setManeuverIndex(0);
       setActiveManeuver(null);
-      routeCommittedKeyRef.current = requestKey;
 
       // The route is ready for the user now. Do not wait for optional
       // intelligence calls before enabling "Enter navigation".
@@ -1592,10 +1574,7 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
     } catch (error) {
       if (requestId !== routeRequestIdRef.current) return;
       console.error('Error loading route:', error);
-      // Preserve an already committed route when a later preview/reroute
-      // request fails. The user can continue with the route that is already
-      // on screen instead of losing Trip Preview entirely.
-      if (!keepSession && routeOptions.length === 0) {
+      if (!keepSession) {
         setRouteOptions([]);
         setRouteDecisionProfiles([]);
         setRouteCommunityIntelligence(new Map());
@@ -1605,7 +1584,6 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
       setRouteError(error instanceof Error ? error.message : 'We could not build this route. Check the locations and try again.');
     } finally {
       if (requestId === routeRequestIdRef.current) setRouteLoading(false);
-      if (routeInFlightKeyRef.current === requestKey) routeInFlightKeyRef.current = null;
     }
   };
 
@@ -1666,11 +1644,6 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
       lat: e.latlng.lat,
       lng: e.latlng.lng,
     };
-    lastPreviewRouteRef.current = null;
-    routeCommittedKeyRef.current = null;
-    routeInFlightKeyRef.current = null;
-    setRouteLoading(false);
-    setRouteError(null);
     setDestination(newDest);
     setShowSearchResults(false);
   };
@@ -2033,7 +2006,7 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
                 <strong>{searchQuery || 'Destination'}</strong>
                 <span>Everything you need before you pull away.</span>
               </div>
-              <button type="button" className="destination-command-close" onClick={() => { lastPreviewRouteRef.current = null; routeCommittedKeyRef.current = null; routeInFlightKeyRef.current = null; setRouteLoading(false); setDestination(null); setRouteOptions([]); setRouteError(null); setSelectedParkingLotId(null); }}>×</button>
+              <button type="button" className="destination-command-close" onClick={() => { setDestination(null); setRouteOptions([]); setRouteError(null); setSelectedParkingLotId(null); }}>×</button>
             </div>
 
             {route && !routeLoading && !routeError && (
@@ -2168,10 +2141,10 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
                 type="button"
                 className="start-navigation-button"
                 onClick={handleStartNavigation}
-                disabled={!route || routeLoading || !!routeError}
+                disabled={!route || !!routeError}
               >
                 <span className="start-navigation-button-icon">➤</span>
-                <span>{routeLoading ? 'Building route…' : 'Enter navigation'}</span>
+                <span>{routeLoading && !route ? 'Building route…' : 'Enter navigation'}</span>
               </button>
             </div>
           </div>
