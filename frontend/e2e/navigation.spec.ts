@@ -1,8 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 
 const ORIGIN = { lat: 43.0000, lng: -78.0000 };
-const DESTINATION = { lat: 43.0018, lng: -78.0000 };
-
 async function configureBrowserMocks(page: Page) {
   // API calls are served by the deterministic mock server configured in
   // playwright.config.ts. Do not intercept /api in the page itself: doing so
@@ -50,8 +48,13 @@ async function prepareNavigationPage(page: Page) {
   await page.goto('/');
   await page.waitForFunction(() => Boolean((window as any).__streeptGpsReady));
   await expect(page.getByPlaceholder('Search for a destination…')).toBeVisible();
+  // Wait until React has actually consumed the mocked geolocation fix.
+  // Calling __streeptSetGps immediately after page load can race the
+  // production watchPosition registration, leaving the route preview without
+  // an origin even though the browser-level mock itself is ready.
+  await expect(page.getByRole('status').filter({ hasText: 'READY' })).toBeVisible({ timeout: 10000 });
   await page.evaluate(({ lat, lng }) => (window as any).__streeptSetGps(lat, lng), ORIGIN);
-  await page.waitForTimeout(250);
+  await expect(page.getByRole('status').filter({ hasText: 'READY' })).toBeVisible({ timeout: 10000 });
 }
 
 async function setGps(page: Page, lat: number, lng: number) {
@@ -65,7 +68,7 @@ test.beforeEach(async ({ page, context }) => {
   await configureBrowserMocks(page);
 });
 
-test('committed route remains startable while background route loading settles', async () => {
+test('committed route remains startable while background route loading settles', async ({ page }) => {
   // The production UI may keep routeLoading true while enrichment/background work settles.
   // A committed route must still expose the real Enter navigation action.
   await prepareNavigationPage(page);
