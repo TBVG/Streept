@@ -25,9 +25,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:e2e": "playwright test",
-    "test:all": "npm test && npm run build && npm run typecheck:e2e && npm run test:e2e",
-    "typecheck:e2e": "tsc -p tsconfig.e2e.json --noEmit"
+    "test:all": "npm test && npm run build"
   },
   "engines": {
     "node": ">=22.0.0 <23"

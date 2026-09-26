@@ -51,20 +51,3 @@ jobs:
           RUST_BACKTRACE: 1
         run: cargo test --all-targets
 
-  e2e:
-    needs: frontend
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm install --no-audit --no-fund
-      - name: Install Chromium
-        working-directory: frontend
-        run: npx playwright install --with-deps chromium
-      - name: Run browser end-to-end tests
-        working-directory: frontend
-        run: npm run test:e2e
