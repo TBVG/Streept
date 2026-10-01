@@ -271,7 +271,15 @@ pub fn analyze(request: NavigationDecisionRequest) -> NavigationDecisionResponse
     }).unwrap_or(200.0);
     let road_evidence = (1.0 - road_distance / 80.0).max(0.0).min(1.0);
     let maneuver_evidence = maneuver_distance.map(|d| (1.0 - d / 500.0).max(0.0).min(1.0)).unwrap_or(0.0);
-    let confidence = (road_evidence * 0.55 + maneuver_evidence * 0.25 + if request.scene.is_some() { 0.2 } else { 0.0 }).clamp(0.0, 1.0);
+    // A route is authoritative navigation evidence even when scene/road context
+    // has not arrived yet. Do not let the absence of optional scene data turn a
+    // known upcoming route maneuver into an "uncertain" decision.
+    let route_evidence = if request.route.is_some() { 0.25 } else { 0.0 };
+    let confidence = (road_evidence * 0.45
+        + maneuver_evidence * 0.30
+        + route_evidence
+        + if request.scene.is_some() { 0.20 } else { 0.0 })
+        .clamp(0.0, 1.0);
     let hazard = hazard_intelligence(&request.reports, traffic_count);
     let lane = lane_intelligence(road.as_ref(), maneuver, request.current_lane_index);
     let intersection = intersection_intelligence(maneuver, maneuver_distance);
