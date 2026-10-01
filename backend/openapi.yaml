@@ -52,6 +52,10 @@ paths:
     get: {summary: Cached 3D scene tile, responses: {'200': {description: Scene tile}}}
   /route:
     get: {summary: Calculate route and immersive navigation data, parameters: [{name: from, in: query, required: true, schema: {type: string}}, {name: to, in: query, required: true, schema: {type: string}}], responses: {'200': {description: Route}}}
+  /navigation/analyze:
+    post: {summary: Analyze and rank candidate routes in the Rust navigation engine, responses: {'200': {description: Ranked navigation analysis}}}
+  /navigation/decision:
+    post: {summary: Evaluate current spatial context and driver-facing navigation policy in Rust, responses: {'200': {description: Rust navigation decision}}}
   /ws:
     get: {summary: Geo-filtered realtime WebSocket, responses: {'101': {description: Switching protocols}}}
 components:

@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::auth::{self, AuthUser};
 use crate::models::*;
+use crate::navigation::{NavigationAnalysisRequest, NavigationAnalysisResponse};
 use crate::AppState;
 use crate::traffic_vehicles;
 
@@ -1950,6 +1951,109 @@ pub async fn get_offline_plan(
         },
         "note": "The client stores the route and maneuver-local scenes locally; live traffic is not treated as offline truth."
     }))))
+}
+
+pub async fn analyze_navigation(
+    Json(request): Json<NavigationAnalysisRequest>,
+) -> Result<Json<ApiResponse<NavigationAnalysisResponse>>, StatusCode> {
+    if request.routes.len() > 8 {
+        return Ok(Json(ApiResponse::error(json!({
+            "error": "too_many_routes",
+            "message": "At most 8 candidate routes may be analyzed at once."
+        }))));
+    }
+
+    let analysis = crate::navigation::analyze(request);
+    Ok(Json(ApiResponse::success(analysis)))
+}
+
+pub async fn navigation_decision(
+    Json(request): Json<crate::navigation::runtime::NavigationDecisionRequest>,
+) -> Result<Json<ApiResponse<crate::navigation::runtime::NavigationDecisionResponse>>, StatusCode> {
+    if request.reports.len() > 256 || request.traffic_vehicles.len() > 1024 {
+        return Ok(Json(ApiResponse::error(json!({
+            "error": "context_too_large",
+            "message": "Navigation decision context exceeds the safe request limit."
+        }))));
+    }
+    Ok(Json(ApiResponse::success(crate::navigation::runtime::analyze(request))))
+}
+
+
+
+pub async fn navigation_session_start(
+    State(state): State<AppState>,
+    Json(request): Json<crate::navigation::runtime::NavigationSessionStart>,
+) -> Result<Json<ApiResponse<crate::navigation::runtime::NavigationSessionResponse>>, StatusCode> {
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let session = crate::navigation::runtime::NavigationSession::new(request);
+    let mut sessions = state.navigation_sessions.write().await;
+    sessions.insert(
+        session_id.clone(),
+        (std::time::Instant::now(), std::sync::Arc::new(tokio::sync::Mutex::new(session))),
+    );
+    Ok(Json(ApiResponse::success(crate::navigation::runtime::NavigationSessionResponse { session_id })))
+}
+
+pub async fn navigation_session_context(
+    State(state): State<AppState>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+    Json(update): Json<crate::navigation::runtime::NavigationSessionContextUpdate>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
+    let session_handle = {
+        let sessions = state.navigation_sessions.read().await;
+        let Some((created, session)) = sessions.get(&session_id) else {
+            return Err(StatusCode::NOT_FOUND);
+        };
+        if created.elapsed() >= std::time::Duration::from_secs(30 * 60) {
+            return Err(StatusCode::NOT_FOUND);
+        }
+        session.clone()
+    };
+
+    let mut session = session_handle.lock().await;
+    session.update_context(update);
+    drop(session);
+
+    let mut sessions = state.navigation_sessions.write().await;
+    if let Some((created, _)) = sessions.get_mut(&session_id) {
+        *created = std::time::Instant::now();
+    }
+    Ok(Json(ApiResponse::success(serde_json::json!({"updated": true}))))
+}
+
+pub async fn navigation_session_step(
+    State(state): State<AppState>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+    Json(observation): Json<crate::navigation::runtime::NavigationSessionObservation>,
+) -> Result<Json<ApiResponse<crate::navigation::runtime::NavigationDecisionResponse>>, StatusCode> {
+    if observation.reports.len() > 256 || observation.traffic_vehicles.len() > 1024 {
+        return Ok(Json(ApiResponse::error(json!({
+            "error": "context_too_large",
+            "message": "Navigation decision context exceeds the safe request limit."
+        }))));
+    }
+    let session_handle = {
+        let sessions = state.navigation_sessions.read().await;
+        let Some((created, session)) = sessions.get(&session_id) else {
+            return Err(StatusCode::NOT_FOUND);
+        };
+        if created.elapsed() >= std::time::Duration::from_secs(30 * 60) {
+            return Err(StatusCode::NOT_FOUND);
+        }
+        session.clone()
+    };
+
+    let mut session = session_handle.lock().await;
+    let decision = session.decide(observation);
+
+    // Touch the activity timestamp separately so the expensive decision lock
+    // never blocks unrelated navigation sessions.
+    let mut sessions = state.navigation_sessions.write().await;
+    if let Some((created, _)) = sessions.get_mut(&session_id) {
+        *created = std::time::Instant::now();
+    }
+    Ok(Json(ApiResponse::success(decision)))
 }
 
 pub async fn get_route(

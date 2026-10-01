@@ -187,3 +187,106 @@
 .immersive-junction-state span { color: rgba(255,255,255,.62); letter-spacing: 0; }
 .immersive-junction-state.is-high { background: rgba(45,127,249,.18); border-color: rgba(45,127,249,.35); }
 .immersive-junction-state.is-elevated { background: rgba(255,255,255,.10); }
+
+/* STREEPT POLISH PASS 2 — immersive navigation finish */
+.immersive-turn-view {
+  background: #0a0f12;
+}
+
+.immersive-turn-view::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 18;
+  background: linear-gradient(180deg, rgba(4,7,9,.18), transparent 25%, transparent 72%, rgba(4,7,9,.28));
+}
+
+.immersive-top-card,
+.immersive-bottom-card {
+  border-color: rgba(255,255,255,.12);
+  background: rgba(5,8,11,.90);
+  box-shadow: 0 22px 65px rgba(0,0,0,.38), inset 0 1px 0 rgba(255,255,255,.055);
+}
+
+.immersive-top-card {
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.immersive-lane-strip {
+  min-height: 72px;
+  background: linear-gradient(180deg, rgba(255,255,255,.025), transparent);
+}
+
+.immersive-lane-arrow.is-active {
+  color: #20f28a;
+  text-shadow: 0 0 20px rgba(32,242,138,.34);
+}
+
+.immersive-distance {
+  font-family: var(--font-display, sans-serif);
+  font-weight: 850;
+}
+
+.immersive-instruction {
+  letter-spacing: -.02em;
+}
+
+.immersive-exit-badge {
+  background: rgba(32,242,138,.13);
+  border: 1px solid rgba(32,242,138,.22);
+  color: #20f28a;
+}
+
+.immersive-side-controls button,
+.immersive-collapse-button {
+  border: 1px solid rgba(255,255,255,.11);
+  background: rgba(5,8,11,.84);
+  backdrop-filter: blur(14px);
+  transition: transform .16s ease, border-color .16s ease, background .16s ease;
+}
+
+.immersive-side-controls button:hover,
+.immersive-collapse-button:hover {
+  transform: scale(1.04);
+  border-color: rgba(32,242,138,.28);
+  background: rgba(9,14,17,.94);
+}
+
+.immersive-route-label {
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(5,8,11,.88);
+  backdrop-filter: blur(14px);
+}
+
+@media (max-width: 600px) {
+  .immersive-top-card { top: 9px; left: 9px; right: 9px; }
+  .immersive-bottom-card { bottom: 9px; left: 9px; right: 9px; }
+  .immersive-lane-strip { padding-left: 12px; padding-right: 12px; min-height: 60px; }
+  .immersive-lane-arrow { font-size: 30px; }
+  .immersive-maneuver-row { padding: 10px 14px 13px; }
+  .immersive-instruction { font-size: 18px; }
+  .immersive-side-controls { right: 9px; gap: 8px; }
+  .immersive-side-controls button,
+  .immersive-collapse-button { width: 42px; height: 42px; }
+}
+
+/* STREEPT POLISH PASS 5 — immersive scene finish */
+.immersive-turn-view {
+  isolation: isolate;
+  background: #080b0e;
+}
+
+.immersive-turn-view::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  background: linear-gradient(180deg, rgba(0,0,0,.26), transparent 24%, transparent 72%, rgba(0,0,0,.24));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .immersive-turn-view *, .immersive-turn-view *::before, .immersive-turn-view *::after { animation: none !important; transition-duration: .01ms !important; }
+}

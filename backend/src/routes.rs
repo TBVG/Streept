@@ -62,6 +62,11 @@ pub fn create_api_router() -> Router<AppState> {
         .route("/billboards/:id/click", post(handlers::click_billboard))
         .route("/billboards/:id/moderate", post(handlers::moderate_billboard))
         .route("/route", get(handlers::get_route))
+        .route("/navigation/analyze", post(handlers::analyze_navigation))
+        .route("/navigation/decision", post(handlers::navigation_decision))
+        .route("/navigation/session", post(handlers::navigation_session_start))
+        .route("/navigation/session/:session_id/step", post(handlers::navigation_session_step))
+        .route("/navigation/session/:session_id/context", post(handlers::navigation_session_context))
         .route("/ws", get(handle_websocket_upgrade))
 }
 

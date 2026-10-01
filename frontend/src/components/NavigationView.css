@@ -2073,3 +2073,1179 @@
   .nav-cockpit { top: 10px; max-width: 520px; }
   .nav-cockpit-signals { display:none; }
 }
+
+/* ========================================================================
+   STREEPT POLISH PASS 1 — product finish
+   Tighten the visual system around one navigation language: electric green
+   route/action, yellow vehicle, restrained glass surfaces, and clear hierarchy.
+   This pass is intentionally presentation-only; navigation logic is unchanged.
+   ======================================================================== */
+
+.navigation-view {
+  --streept-accent: #20f28a;
+  --streept-accent-dim: #12b968;
+  --streept-vehicle: #ffd33d;
+  --streept-glass-strong: rgba(4, 7, 10, .94);
+  --streept-glass-soft: rgba(5, 8, 11, .76);
+  --streept-hairline: rgba(255,255,255,.11);
+}
+
+/* A subtle edge vignette makes the map feel like the canvas of a navigation
+   instrument without obscuring roads or intercepting pointer events. */
+.navigation-view .map-pane::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 700;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(0,0,0,.18) 0%, transparent 18%, transparent 78%, rgba(0,0,0,.20) 100%),
+    linear-gradient(90deg, rgba(0,0,0,.10), transparent 18%, transparent 82%, rgba(0,0,0,.10));
+}
+
+.navigation-view .brand-mark,
+.navigation-view .gps-status,
+.navigation-view .trip-search,
+.navigation-view .nav-theme-toggle,
+.navigation-view .map-utility-stack,
+.navigation-view .route-picker,
+.navigation-view .home-command-center,
+.navigation-view .destination-command-center,
+.navigation-view .start-navigation-card,
+.navigation-view .nav-cockpit,
+.navigation-view .offline-banner,
+.navigation-view .live-data-status,
+.navigation-view .live-data-error,
+.navigation-view .spatial-cue,
+.navigation-view .navigation-instructions,
+.navigation-view .map-location-control,
+.navigation-view .report-button-container,
+.navigation-view .parking-status,
+.navigation-view .floating-error,
+.navigation-view .arrival-experience {
+  z-index: 1000;
+}
+
+.navigation-view .trip-search {
+  z-index: 1600;
+}
+.navigation-view .trip-search-fields {
+  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+.navigation-view .trip-search-fields:focus-within {
+  border-color: rgba(32,242,138,.48);
+  box-shadow: 0 20px 64px rgba(0,0,0,.46), 0 0 0 3px rgba(32,242,138,.08), inset 0 1px 0 rgba(255,255,255,.06);
+}
+.navigation-view .trip-search-input::placeholder {
+  opacity: .68;
+}
+.navigation-view .trip-search-result {
+  transition: background-color .14s ease, padding-left .14s ease;
+}
+.navigation-view .trip-search-result:hover,
+.navigation-view .trip-search-result:focus-visible {
+  padding-left: 17px;
+  background: rgba(32,242,138,.075);
+}
+
+/* Keep every primary navigation action on the same green semantic rail. */
+.navigation-view .start-navigation-button,
+.navigation-view .nav-cockpit-lane.is-valid,
+.navigation-view .nav-cockpit-progress span,
+.navigation-view .lane-guidance-lane--valid,
+.navigation-view .map-legend-line--route {
+  background: var(--streept-accent);
+  border-color: var(--streept-accent);
+  color: #031008;
+}
+.navigation-view .start-navigation-button:hover:not(:disabled) {
+  background: #35f69a;
+  box-shadow: 0 10px 28px rgba(32,242,138,.26);
+}
+.navigation-view .start-navigation-button:focus-visible {
+  outline-color: var(--streept-accent);
+  box-shadow: 0 0 0 4px rgba(32,242,138,.14), 0 10px 28px rgba(32,242,138,.20);
+}
+.navigation-view .nav-cockpit-progress span {
+  box-shadow: 0 0 12px rgba(32,242,138,.42);
+}
+
+/* Route preview: stronger hierarchy, quieter secondary controls. */
+.navigation-view .start-navigation-card {
+  padding: 17px;
+  border-color: rgba(255,255,255,.14);
+  background: linear-gradient(145deg, rgba(5,8,11,.97), rgba(10,14,18,.93));
+  box-shadow: 0 30px 80px rgba(0,0,0,.52), inset 0 1px 0 rgba(255,255,255,.055);
+}
+.navigation-view .start-navigation-card.is-focused {
+  border-color: rgba(32,242,138,.32);
+  box-shadow: 0 30px 80px rgba(0,0,0,.52), 0 0 0 1px rgba(32,242,138,.10), inset 0 1px 0 rgba(255,255,255,.06);
+}
+.navigation-view .start-navigation-eyebrow {
+  color: var(--streept-accent);
+  letter-spacing: .18em;
+}
+.navigation-view .start-navigation-route-head strong {
+  letter-spacing: -.025em;
+}
+.navigation-view .start-navigation-metrics {
+  border: 1px solid rgba(255,255,255,.055);
+  background: rgba(255,255,255,.045);
+}
+.navigation-view .start-navigation-secondary {
+  border-color: rgba(255,255,255,.10);
+  background: rgba(255,255,255,.045);
+  color: rgba(255,255,255,.70);
+}
+.navigation-view .start-navigation-secondary:hover {
+  border-color: rgba(255,255,255,.18);
+  background: rgba(255,255,255,.075);
+}
+.navigation-view .start-navigation-status:not(.is-error) {
+  position: relative;
+  overflow: hidden;
+}
+.navigation-view .start-navigation-status:not(.is-error)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.035), transparent);
+  transform: translateX(-100%);
+  animation: streept-status-sheen 2.8s ease-in-out infinite;
+}
+@keyframes streept-status-sheen {
+  0%, 35% { transform: translateX(-100%); }
+  70%, 100% { transform: translateX(100%); }
+}
+
+/* Home screen: give the first interaction a deliberate product identity. */
+.navigation-view .home-command-center {
+  border-color: rgba(255,255,255,.14);
+  box-shadow: 0 30px 80px rgba(0,0,0,.50), inset 0 1px 0 rgba(255,255,255,.06);
+}
+.navigation-view .home-command-actions button {
+  min-height: 66px;
+  border-color: rgba(255,255,255,.09);
+  transition: transform .16s ease, background .16s ease, border-color .16s ease;
+}
+.navigation-view .home-command-actions button:hover,
+.navigation-view .home-command-actions button:focus-visible {
+  transform: translateY(-2px);
+  background: rgba(32,242,138,.055);
+  border-color: rgba(32,242,138,.24);
+}
+.navigation-view .home-action-icon {
+  width: 36px;
+  height: 36px;
+  background: rgba(32,242,138,.10);
+  color: var(--streept-accent);
+}
+.navigation-view .home-command-head h1 {
+  text-wrap: balance;
+}
+
+/* Destination review: make the selected route unmistakable at a glance. */
+.navigation-view .destination-command-center {
+  border-color: rgba(255,255,255,.14);
+  box-shadow: 0 30px 80px rgba(0,0,0,.50), inset 0 1px 0 rgba(255,255,255,.06);
+}
+.navigation-view .destination-route-option.is-selected {
+  background: rgba(32,242,138,.065);
+  border-color: rgba(32,242,138,.20);
+}
+.navigation-view .destination-route-option.is-selected strong {
+  color: #fff;
+}
+
+/* Live navigation: less visual noise, stronger maneuver focus. */
+.navigation-view .nav-cockpit {
+  border-color: rgba(255,255,255,.14);
+  box-shadow: 0 28px 76px rgba(0,0,0,.50), inset 0 1px 0 rgba(255,255,255,.055);
+}
+.navigation-view .nav-cockpit-turn-icon {
+  background: rgba(32,242,138,.095);
+  border-color: rgba(32,242,138,.20);
+}
+.navigation-view .nav-cockpit-turn-icon span {
+  color: #fff;
+}
+.navigation-view .nav-cockpit-actions button:hover:not(:disabled) {
+  border-color: rgba(255,255,255,.15);
+  background: rgba(255,255,255,.10);
+}
+.navigation-view .nav-cockpit-actions .nav-cockpit-stop:hover:not(:disabled) {
+  background: rgba(240,77,77,.22);
+}
+
+/* Light mode gets the same hierarchy without importing the dark glass values. */
+[data-theme='light'] .navigation-view .trip-search-fields,
+[data-theme='light'] .navigation-view .home-command-center,
+[data-theme='light'] .navigation-view .destination-command-center,
+[data-theme='light'] .navigation-view .start-navigation-card,
+[data-theme='light'] .navigation-view .nav-cockpit {
+  background: rgba(255,255,255,.94);
+  border-color: rgba(31,29,24,.12);
+  box-shadow: 0 24px 60px rgba(31,29,24,.16), inset 0 1px 0 rgba(255,255,255,.9);
+}
+[data-theme='light'] .navigation-view .start-navigation-route-head strong,
+[data-theme='light'] .navigation-view .nav-cockpit-turn-icon span {
+  color: var(--paper);
+}
+[data-theme='light'] .navigation-view .home-command-actions button:hover,
+[data-theme='light'] .navigation-view .home-command-actions button:focus-visible {
+  background: rgba(22,185,104,.07);
+  border-color: rgba(22,185,104,.25);
+}
+
+@media (max-width: 820px) {
+  .navigation-view .trip-search { z-index: 1600; }
+  .navigation-view .home-command-center,
+  .navigation-view .destination-command-center {
+    box-shadow: 0 24px 60px rgba(0,0,0,.46), inset 0 1px 0 rgba(255,255,255,.05);
+  }
+}
+
+@media (max-width: 600px) {
+  .navigation-view .home-command-actions button { min-height: 58px; }
+  .navigation-view .start-navigation-card { padding: 14px; }
+  .navigation-view .start-navigation-metrics { gap: 14px; }
+  .navigation-view .start-navigation-metrics strong { font-size: 17px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .navigation-view .start-navigation-status:not(.is-error)::after { animation: none; }
+}
+
+/* ========================================================================
+   STREEPT POLISH PASS 2 — full product finish
+   Presentation-focused pass across planning, preview, navigation, map chrome,
+   arrival, responsive layouts, and interaction states. No navigation logic.
+   ======================================================================== */
+
+.navigation-view {
+  --streept-accent: #20f28a;
+  --streept-accent-soft: rgba(32,242,138,.10);
+  --streept-accent-line: rgba(32,242,138,.24);
+  --streept-warning: #ffd45a;
+  --streept-danger: #ff6f73;
+  --streept-glass: rgba(7,10,13,.86);
+  --streept-glass-heavy: rgba(5,8,11,.96);
+  --streept-line: rgba(255,255,255,.10);
+  --streept-line-soft: rgba(255,255,255,.065);
+  --streept-shadow-deep: 0 28px 90px rgba(0,0,0,.48);
+}
+
+.navigation-view button,
+.navigation-view input {
+  -webkit-font-smoothing: antialiased;
+}
+
+.navigation-view .map-pane,
+.navigation-view .map3d-pane {
+  isolation: isolate;
+}
+
+.navigation-view .map-pane::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 650;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 42%, transparent 38%, rgba(0,0,0,.08) 100%);
+}
+
+/* ------------------------------------------------------------------------
+   Planning/search surface
+   ------------------------------------------------------------------------ */
+
+.navigation-view .trip-search {
+  filter: drop-shadow(0 22px 50px rgba(0,0,0,.28));
+}
+
+.navigation-view .trip-search-fields {
+  min-height: 54px;
+  padding: 5px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.13);
+  background: rgba(7,10,13,.90);
+  box-shadow: 0 14px 45px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.055);
+}
+
+.navigation-view .trip-search-field-group {
+  min-height: 43px;
+  border-radius: 13px;
+  transition: background .18s ease, box-shadow .18s ease;
+}
+
+.navigation-view .trip-search-field-group:focus-within {
+  background: rgba(255,255,255,.035);
+  box-shadow: inset 0 0 0 1px rgba(32,242,138,.12);
+}
+
+.navigation-view .trip-search-input {
+  font-weight: 560;
+  letter-spacing: -.01em;
+}
+
+.navigation-view .trip-search-input:focus {
+  outline: none;
+}
+
+.navigation-view .trip-search-results {
+  margin-top: 7px;
+  padding: 6px;
+  border: 1px solid rgba(255,255,255,.11);
+  background: rgba(5,8,11,.975);
+  box-shadow: 0 24px 60px rgba(0,0,0,.48);
+}
+
+.navigation-view .trip-search-section-label {
+  padding: 9px 10px 6px;
+  color: rgba(255,255,255,.40);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: .13em;
+}
+
+.navigation-view .trip-search-result {
+  border-radius: 11px;
+  margin: 1px 0;
+}
+
+.navigation-view .trip-search-attribution {
+  padding: 7px 10px 5px;
+  color: rgba(255,255,255,.31);
+  font-size: 8px;
+}
+
+/* ------------------------------------------------------------------------
+   Home / destination command centers
+   ------------------------------------------------------------------------ */
+
+.navigation-view .home-command-center,
+.navigation-view .destination-command-center {
+  overflow: hidden;
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 90% 0%, rgba(32,242,138,.055), transparent 32%),
+    linear-gradient(145deg, rgba(6,9,12,.965), rgba(13,17,21,.93));
+}
+
+.navigation-view .home-command-center::before,
+.navigation-view .destination-command-center::before,
+.navigation-view .start-navigation-card::before,
+.navigation-view .nav-cockpit::before {
+  content: '';
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.12), transparent);
+  pointer-events: none;
+}
+
+.navigation-view .home-command-head {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--streept-line-soft);
+}
+
+.navigation-view .home-eyebrow,
+.navigation-view .start-navigation-eyebrow,
+.navigation-view .destination-command-title .home-eyebrow {
+  font-weight: 850;
+  letter-spacing: .16em;
+}
+
+.navigation-view .home-command-head h1 {
+  font-weight: 760;
+  letter-spacing: -.055em;
+  line-height: .98;
+}
+
+.navigation-view .home-command-head p {
+  color: rgba(255,255,255,.53);
+  line-height: 1.45;
+}
+
+.navigation-view .home-command-actions {
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.navigation-view .home-command-actions button {
+  position: relative;
+  overflow: hidden;
+  border-radius: 15px;
+  background: linear-gradient(145deg, rgba(255,255,255,.052), rgba(255,255,255,.025));
+}
+
+.navigation-view .home-command-actions button::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 20%, rgba(255,255,255,.035) 48%, transparent 72%);
+  transform: translateX(-100%);
+  transition: transform .55s ease;
+}
+
+.navigation-view .home-command-actions button:hover::after,
+.navigation-view .home-command-actions button:focus-visible::after {
+  transform: translateX(100%);
+}
+
+.navigation-view .home-recent {
+  border-top: 1px solid var(--streept-line-soft);
+  padding-top: 10px;
+  margin-top: 10px;
+}
+
+.navigation-view .home-recent button {
+  border-radius: 11px;
+  transition: background .15s ease, transform .15s ease;
+}
+
+.navigation-view .home-recent button:hover {
+  background: rgba(255,255,255,.045);
+  transform: translateX(2px);
+}
+
+.navigation-view .home-parking-snapshot {
+  border: 1px solid rgba(74,223,189,.13);
+  background: rgba(74,223,189,.045);
+  border-radius: 14px;
+}
+
+/* ------------------------------------------------------------------------
+   Route review / trip intelligence
+   ------------------------------------------------------------------------ */
+
+.navigation-view .destination-command-center {
+  max-height: min(78vh, 760px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.navigation-view .destination-command-head {
+  position: sticky;
+  top: -1px;
+  z-index: 3;
+  padding-bottom: 10px;
+  background: linear-gradient(180deg, rgba(6,9,12,.99) 72%, transparent);
+}
+
+.navigation-view .destination-route-primary {
+  border-radius: 16px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
+}
+
+.navigation-view .destination-route-option {
+  border-radius: 13px;
+  background: rgba(255,255,255,.025);
+}
+
+.navigation-view .destination-route-option:hover {
+  background: rgba(255,255,255,.05);
+}
+
+.navigation-view .destination-alert-strip {
+  border-radius: 13px;
+}
+
+.navigation-view .destination-parking {
+  border-top-color: var(--streept-line-soft);
+}
+
+.navigation-view .destination-parking-row {
+  border-radius: 12px;
+}
+
+/* ------------------------------------------------------------------------
+   Trip preview: primary conversion moment
+   ------------------------------------------------------------------------ */
+
+.navigation-view .start-navigation-card {
+  width: min(430px, calc(100% - 40px));
+  border-radius: 22px;
+  overflow: hidden;
+}
+
+.navigation-view .start-navigation-route-head {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--streept-line-soft);
+}
+
+.navigation-view .start-navigation-destination {
+  max-width: 100%;
+  font-weight: 720;
+  letter-spacing: -.02em;
+}
+
+.navigation-view .start-navigation-metrics {
+  margin-top: 12px;
+  padding: 11px 12px;
+  border-radius: 14px;
+  background: rgba(255,255,255,.04);
+}
+
+.navigation-view .start-navigation-metrics strong {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -.03em;
+}
+
+.navigation-view .start-navigation-actions {
+  margin-top: 12px;
+  gap: 8px;
+}
+
+.navigation-view .start-navigation-button {
+  min-height: 52px;
+  border-radius: 15px;
+  letter-spacing: -.015em;
+  box-shadow: 0 10px 30px rgba(32,242,138,.16), inset 0 1px 0 rgba(255,255,255,.24);
+}
+
+.navigation-view .start-navigation-button:disabled {
+  box-shadow: none;
+  filter: saturate(.55);
+}
+
+.navigation-view .start-navigation-button-icon {
+  transition: transform .18s ease;
+}
+
+.navigation-view .start-navigation-button:hover:not(:disabled) .start-navigation-button-icon {
+  transform: translateX(3px);
+}
+
+.navigation-view .start-navigation-secondary {
+  min-height: 52px;
+  border-radius: 15px;
+}
+
+/* ------------------------------------------------------------------------
+   Active navigation cockpit
+   ------------------------------------------------------------------------ */
+
+.navigation-view .nav-cockpit {
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 0 0, rgba(32,242,138,.055), transparent 34%),
+    rgba(5,8,11,.95);
+}
+
+.navigation-view .nav-cockpit-header {
+  border-bottom: 1px solid var(--streept-line-soft);
+  padding-bottom: 9px;
+}
+
+.navigation-view .nav-cockpit-live {
+  font-weight: 850;
+  letter-spacing: .14em;
+}
+
+.navigation-view .nav-cockpit-turn {
+  padding-top: 12px;
+}
+
+.navigation-view .nav-cockpit-turn-icon {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 8px 22px rgba(0,0,0,.18);
+}
+
+.navigation-view .nav-cockpit-distance {
+  font-family: var(--font-display);
+  font-weight: 850;
+  letter-spacing: -.045em;
+}
+
+.navigation-view .nav-cockpit-instruction {
+  font-weight: 720;
+  letter-spacing: -.015em;
+}
+
+.navigation-view .nav-cockpit-progress {
+  height: 4px;
+  margin-top: 13px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.075);
+  overflow: hidden;
+}
+
+.navigation-view .nav-cockpit-progress span {
+  border-radius: inherit;
+}
+
+.navigation-view .nav-cockpit-signals {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--streept-line-soft);
+}
+
+.navigation-view .nav-cockpit-signal strong {
+  font-family: var(--font-display);
+  font-size: 15px;
+}
+
+.navigation-view .nav-cockpit-actions {
+  margin-top: 11px;
+}
+
+/* ------------------------------------------------------------------------
+   Map controls / status chrome
+   ------------------------------------------------------------------------ */
+
+.navigation-view .gps-status,
+.navigation-view .map-intelligence-strip,
+.navigation-view .live-data-status,
+.navigation-view .offline-banner {
+  border-color: rgba(255,255,255,.12);
+  box-shadow: 0 12px 30px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.045);
+}
+
+.navigation-view .gps-status {
+  padding: 8px 12px;
+  font-size: 10px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.navigation-view .map-utility-stack {
+  gap: 7px;
+}
+
+.navigation-view .map-utility-button,
+.navigation-view .locate-me-button {
+  border-color: rgba(255,255,255,.13);
+  background: rgba(8,11,14,.86);
+  box-shadow: 0 12px 28px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.05);
+  backdrop-filter: blur(16px);
+}
+
+.navigation-view .map-utility-button:hover,
+.navigation-view .locate-me-button:hover {
+  border-color: rgba(32,242,138,.28);
+  background: rgba(11,16,19,.94);
+  box-shadow: 0 14px 30px rgba(0,0,0,.30), 0 0 0 3px rgba(32,242,138,.055);
+}
+
+.navigation-view .map-location-control {
+  bottom: 84px;
+}
+
+.navigation-view .map-intelligence-strip {
+  background: rgba(7,10,13,.78);
+}
+
+.navigation-view .map-intelligence-items b {
+  color: #fff;
+}
+
+/* ------------------------------------------------------------------------
+   Arrival / completion
+   ------------------------------------------------------------------------ */
+
+.navigation-view .arrival-experience {
+  border-radius: 22px;
+}
+
+.navigation-view .arrival-check {
+  box-shadow: 0 0 0 6px rgba(74,223,189,.045);
+}
+
+.navigation-view .arrival-parking-card {
+  min-height: 52px;
+}
+
+.navigation-view .arrival-footer {
+  border-top: 1px solid var(--streept-line-soft);
+  padding-top: 9px;
+}
+
+/* ------------------------------------------------------------------------
+   3D / immersive presentation
+   ------------------------------------------------------------------------ */
+
+.navigation-view .map3d-pane {
+  border-left-color: rgba(255,255,255,.10);
+  box-shadow: inset 14px 0 32px rgba(0,0,0,.08);
+}
+
+.navigation-view .map3d-pane::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 500;
+  background: linear-gradient(90deg, rgba(0,0,0,.14), transparent 7%, transparent 93%, rgba(0,0,0,.10));
+}
+
+/* ------------------------------------------------------------------------
+   Responsive product layout
+   ------------------------------------------------------------------------ */
+
+@media (min-width: 1200px) {
+  .navigation-view .home-command-center,
+  .navigation-view .destination-command-center {
+    width: 390px;
+  }
+
+  .navigation-view .start-navigation-card {
+    width: 430px;
+  }
+}
+
+@media (max-width: 900px) {
+  .navigation-view .home-command-center,
+  .navigation-view .destination-command-center,
+  .navigation-view .start-navigation-card {
+    border-radius: 18px;
+  }
+
+  .navigation-view .map-location-control {
+    bottom: 74px;
+  }
+}
+
+@media (max-width: 700px) {
+  .navigation-view .trip-search {
+    left: 9px;
+    right: 9px;
+    width: auto;
+  }
+
+  .navigation-view .trip-search-fields {
+    min-height: 50px;
+    border-radius: 16px;
+  }
+
+  .navigation-view .home-command-center,
+  .navigation-view .destination-command-center {
+    width: calc(100% - 18px);
+    max-height: calc(100vh - 150px);
+    border-radius: 18px;
+  }
+
+  .navigation-view .start-navigation-card {
+    left: 9px;
+    right: 9px;
+    bottom: 12px;
+    width: auto;
+    border-radius: 18px;
+  }
+
+  .navigation-view .start-navigation-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .navigation-view .start-navigation-secondary,
+  .navigation-view .start-navigation-button {
+    width: 100%;
+  }
+
+  .navigation-view .nav-cockpit {
+    left: 9px;
+    right: 9px;
+    width: auto;
+    border-radius: 18px;
+  }
+
+  .navigation-view .nav-cockpit-signals {
+    gap: 7px;
+  }
+
+  .navigation-view .map-intelligence-strip {
+    left: 9px;
+    right: 9px;
+    width: max-content;
+    max-width: calc(100% - 18px);
+    overflow: hidden;
+  }
+
+  .navigation-view .map-intelligence-items {
+    overflow: hidden;
+  }
+
+  .navigation-view .map-intelligence-items span:nth-child(n+3) {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .navigation-view .home-command-center,
+  .navigation-view .destination-command-center {
+    padding: 12px;
+  }
+
+  .navigation-view .home-command-head h1 {
+    font-size: 25px;
+  }
+
+  .navigation-view .start-navigation-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .navigation-view .start-navigation-metrics strong {
+    font-size: 16px;
+  }
+
+  .navigation-view .nav-cockpit-distance {
+    font-size: 25px;
+  }
+
+  .navigation-view .nav-cockpit-instruction {
+    font-size: 15px;
+  }
+
+  .navigation-view .nav-cockpit-intelligence {
+    min-width: 0;
+    max-width: 180px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .navigation-view .home-command-actions button::after {
+    display: none;
+  }
+}
+
+/* STREEPT POLISH PASS 4 — navigation cockpit and map interaction refinement */
+.navigation-view {
+  isolation: isolate;
+  background: var(--asphalt);
+}
+
+.map-pane,
+.map3d-pane {
+  will-change: transform;
+}
+
+.map3d-pane {
+  border-left-color: color-mix(in srgb, var(--surface-line) 65%, transparent);
+}
+
+.navigation-instructions,
+.parking-status,
+.floating-error,
+.report-menu,
+.trip-search-results {
+  backdrop-filter: blur(20px) saturate(1.08);
+  -webkit-backdrop-filter: blur(20px) saturate(1.08);
+}
+
+.navigation-instructions,
+.parking-status,
+.floating-error {
+  animation: streept-overlay-in 180ms ease-out both;
+}
+
+@keyframes streept-overlay-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.locate-me-button {
+  border-color: color-mix(in srgb, var(--surface-line) 80%, transparent);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+}
+
+.locate-me-button:hover {
+  border-color: color-mix(in srgb, var(--route-amber) 34%, var(--surface-line));
+}
+
+.report-fab {
+  min-height: 44px;
+  padding-inline: 18px;
+}
+
+.report-menu button,
+.parking-status button,
+.floating-error button,
+.ar-trigger-button {
+  min-height: 40px;
+}
+
+.nav-cockpit,
+.start-navigation-card,
+.destination-command-center,
+.arrival-experience {
+  backdrop-filter: blur(24px) saturate(1.12);
+  -webkit-backdrop-filter: blur(24px) saturate(1.12);
+}
+
+.nav-cockpit-progress {
+  overflow: hidden;
+}
+
+.nav-cockpit-progress > * {
+  transition: width 300ms cubic-bezier(.2,.8,.2,1);
+}
+
+.nav-cockpit-turn-icon {
+  filter: drop-shadow(0 5px 14px color-mix(in srgb, var(--route-amber) 16%, transparent));
+}
+
+.nav-cockpit-alert {
+  border-color: color-mix(in srgb, var(--alert-red) 28%, var(--surface-line));
+}
+
+.lane-guidance,
+.nav-cockpit-lanes {
+  contain: layout paint;
+}
+
+.map-intelligence-strip,
+.destination-intelligence-strip,
+.trip-intelligence-strip {
+  border-color: color-mix(in srgb, var(--surface-line) 68%, transparent);
+}
+
+.map-layer-legend {
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+@media (max-width: 760px) {
+  .gps-status {
+    top: max(10px, env(safe-area-inset-top));
+    left: 10px;
+  }
+
+  .map-location-control {
+    right: 12px;
+    bottom: max(76px, calc(72px + env(safe-area-inset-bottom)));
+  }
+
+  .locate-me-button {
+    width: 48px;
+    height: 48px;
+  }
+
+  .report-button-container {
+    right: 12px;
+    bottom: max(12px, env(safe-area-inset-bottom));
+  }
+
+  .report-fab {
+    min-height: 46px;
+  }
+
+  .navigation-instructions {
+    left: 12px;
+    right: 12px;
+    bottom: max(12px, env(safe-area-inset-bottom));
+    max-width: none;
+  }
+
+  .parking-status,
+  .floating-error {
+    left: 12px;
+    right: 12px;
+    top: 112px;
+    max-width: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .navigation-view.split-view {
+    flex-direction: column;
+  }
+
+  .navigation-view.split-view .map-pane {
+    flex: 0 0 46%;
+    min-height: 220px;
+  }
+
+  .navigation-view.split-view .map3d-pane {
+    flex: 1 1 54%;
+    min-height: 0;
+    border-left: 0;
+    border-top: 1px solid color-mix(in srgb, var(--surface-line) 65%, transparent);
+  }
+
+  .gps-status {
+    font-size: 11px;
+    padding: 7px 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .navigation-instructions,
+  .parking-status,
+  .floating-error { animation: none; }
+
+  .nav-cockpit-progress > * { transition: none; }
+}
+
+/* STREEPT POLISH PASS 5 — final navigation cockpit finish */
+.navigation-view {
+  position: relative;
+  isolation: isolate;
+  background: var(--asphalt);
+}
+
+.navigation-view::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1090;
+  background: linear-gradient(180deg, rgba(0,0,0,.16), transparent 16%, transparent 82%, rgba(0,0,0,.12));
+}
+
+.navigation-view > * { position: relative; }
+
+.gps-status {
+  border-color: color-mix(in srgb, var(--paper) 12%, transparent);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  box-shadow: 0 12px 30px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.05);
+  backdrop-filter: blur(18px) saturate(1.15);
+}
+
+.gps-status-dot { animation: streept-gps-pulse 2.4s ease-in-out infinite; }
+@keyframes streept-gps-pulse {
+  0%,100% { opacity: .72; box-shadow: 0 0 0 3px rgba(255,255,255,.06); }
+  50% { opacity: 1; box-shadow: 0 0 0 5px rgba(255,255,255,.025); }
+}
+
+.map-pane,
+.map3d-pane { overflow: hidden; }
+
+.map-pane::after,
+.map3d-pane::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  box-shadow: inset 0 0 80px rgba(0,0,0,.10);
+}
+
+.map3d-pane { border-left-color: color-mix(in srgb, var(--paper) 10%, transparent); }
+
+.navigation-instructions,
+.parking-status,
+.floating-error,
+.trip-search-results,
+.trip-search-fields,
+.start-navigation-card,
+.route-picker-option,
+.report-menu {
+  border-color: color-mix(in srgb, var(--paper) 10%, var(--surface-line));
+  box-shadow: 0 18px 42px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.045);
+}
+
+.navigation-instructions {
+  padding: 15px 17px;
+  border-radius: 18px;
+}
+
+.navigation-instructions h3 { letter-spacing: .07em; }
+
+.trip-search-fields {
+  border-radius: 18px;
+  padding: 6px;
+}
+
+.trip-search-input { font-size: 14px; min-height: 40px; }
+
+.trip-search-result {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  line-height: 1.35;
+}
+
+.trip-search-result:last-child { border-bottom: 0; }
+.trip-search-result:focus-visible { background: var(--surface-raised); }
+
+.route-picker {
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+.route-picker::-webkit-scrollbar { display: none; }
+
+.route-picker-option {
+  min-width: 118px;
+  padding: 10px 13px;
+  transition: transform 160ms var(--streept-ease), border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+
+.route-picker-option--selected {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--route-amber) 20%, transparent), 0 10px 28px rgba(0,0,0,.18);
+}
+
+.start-navigation-card {
+  border-radius: 20px;
+  padding: 12px 12px 12px 15px;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+}
+
+.start-navigation-summary strong { letter-spacing: -.015em; }
+.start-navigation-button {
+  min-height: 44px;
+  padding-inline: 18px;
+  background: var(--route-amber);
+  color: #07120d;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--route-amber) 18%, transparent);
+}
+
+.start-navigation-button:hover {
+  filter: brightness(1.035) saturate(1.04);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--route-amber) 22%, transparent);
+}
+
+.start-navigation-button:disabled {
+  filter: saturate(.35);
+  box-shadow: none;
+}
+
+.locate-me-button {
+  width: 48px;
+  height: 48px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  border-color: color-mix(in srgb, var(--paper) 12%, var(--surface-line));
+  backdrop-filter: blur(16px);
+}
+
+.report-fab { min-height: 44px; }
+
+.offline-banner {
+  backdrop-filter: blur(16px);
+  box-shadow: 0 12px 28px rgba(0,0,0,.22);
+}
+
+.lane-guidance-lane {
+  transition: transform 160ms ease, background-color 180ms ease, color 180ms ease;
+}
+.lane-guidance-lane--valid {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--route-amber) 26%, transparent), 0 5px 18px color-mix(in srgb, var(--route-amber) 12%, transparent);
+}
+
+@media (max-width: 760px) {
+  .navigation-view::after { background: linear-gradient(180deg, rgba(0,0,0,.10), transparent 18%, transparent 78%, rgba(0,0,0,.18)); }
+  .destination-search, .trip-search { top: 68px; left: 10px; right: 10px; }
+  .nav-theme-toggle { top: 10px; right: 10px; }
+  .logout-button { top: 10px; left: 10px; }
+  .route-picker { top: 126px; left: 10px; right: 10px; max-width: none; }
+  .start-navigation-card { gap: 10px; }
+  .start-navigation-summary { flex: 1 1 auto; }
+  .start-navigation-button { min-height: 46px; }
+  .map-location-control { right: 12px; bottom: 82px; }
+  .report-button-container { right: 12px; bottom: 14px; }
+}
+
+@media (max-width: 430px) {
+  .start-navigation-card { align-items: stretch; }
+  .start-navigation-button { padding-inline: 14px; }
+  .start-navigation-summary strong { font-size: 14px; }
+  .route-picker-option { min-width: 108px; }
+  .gps-status { max-width: calc(100vw - 20px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gps-status-dot, .network-banner, .home-live-dot { animation: none !important; }
+}

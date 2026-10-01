@@ -4,6 +4,8 @@
 
 Streept is a **web-first navigation platform** built around a simple idea: traditional navigation treats the world like a flat line on a map. Streept is designed to turn that route into a **spatial, contextual experience**.
 
+**Architecture:** Streept is intentionally Rust-first. Rust owns the navigation decision plane: route risk/scoring, learned road difficulty, maneuver complexity, route ordering, spatial context, hazard policy, lane-policy signals, guidance, and driver-facing decisions. TypeScript/React focuses on the browser UI, map/3D rendering, device APIs, local continuity, offline storage, and presentation.
+
 It combines turn-by-turn routing, lane and junction intelligence, live community information, predictive spatial context, and an immersive first-person 3D view that can appear automatically when a maneuver needs more visual understanding.
 
 **The goal:** make navigation feel less like following a line and more like having the road explained to you at the moment it matters.

@@ -6,6 +6,7 @@ pub mod database;
 pub mod geocode;
 pub mod handlers;
 pub mod models;
+pub mod navigation;
 pub mod rate_limit;
 pub mod routes;
 pub mod scene_tiles;
@@ -36,6 +37,9 @@ pub struct AppState {
     pub traffic_cache_hits: Arc<AtomicU64>,
     pub route_cache: Arc<tokio::sync::RwLock<HashMap<String, (Instant, models::RouteOptions)>>>,
     pub http_client: reqwest::Client,
+    /// Persistent Rust navigation sessions. Route topology is installed once
+    /// and only live observations travel through the hot path.
+    pub navigation_sessions: Arc<tokio::sync::RwLock<HashMap<String, (Instant, Arc<tokio::sync::Mutex<navigation::runtime::NavigationSession>>)>>>,
 }
 
 impl AppState {
@@ -60,6 +64,7 @@ impl AppState {
             traffic_cache_hits: Arc::new(AtomicU64::new(0)),
             route_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             http_client: reqwest::Client::new(),
+            navigation_sessions: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         }
     }
 }

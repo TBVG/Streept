@@ -38,6 +38,7 @@ async fn main() -> anyhow::Result<()> {
         traffic_requests: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         traffic_cache_hits: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         route_cache: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        navigation_sessions: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         http_client: reqwest::Client::builder()
             .pool_max_idle_per_host(16)
             .connect_timeout(std::time::Duration::from_secs(4))
@@ -62,6 +63,13 @@ async fn main() -> anyhow::Result<()> {
                 Err(e) => {
                     tracing::error!("Failed to sweep stale parking occupancy: {}", e);
                 }
+            }
+
+            // Purge inactive navigation sessions. Sessions are deliberately
+            // short-lived state; they must never become an unbounded cache.
+            {
+                let mut sessions = sweep_state.navigation_sessions.write().await;
+                sessions.retain(|_, (created, _)| created.elapsed() < std::time::Duration::from_secs(30 * 60));
             }
 
             // Purge expired reports/billboards so these tables don't grow

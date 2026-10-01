@@ -36,7 +36,7 @@ No paid API key is required by the application architecture.
 
 ## Release constraints
 
-The final application still needs to be verified in the user's normal Windows/Docker environment with its installed Node/Rust dependencies. The current coding environment lacks the project's installed `node_modules` and Rust toolchain, so a full production build is not claimed here.
+The final application still needs to be verified in the user's normal Windows/Docker environment with its installed Node/Rust dependencies. The current coding environment does not have the project's Rust toolchain or installed frontend dependencies, so a full production build is not claimed here. The release package includes a structural Rust gate that runs before dependency installation.
 
 ## Next after release candidate
 
@@ -50,3 +50,15 @@ These are expansion tracks, not prerequisites for the current product spine:
 - on-device ML for richer prediction
 - native iOS/Android driver experience
 - automotive integrations
+
+
+## Current Rust-first release gate
+
+- The old duplicate `backend/src/navigation.rs` module has been removed.
+- The canonical Rust navigation module is `backend/src/navigation/mod.rs`.
+- Rust navigation analysis, decision, persistent-session, and session-context HTTP endpoints are registered.
+- The frontend Rust bridge is present under `frontend/src/navigation/rust/`.
+- Live Rust sessions use per-session locks so independent sessions can make decisions concurrently.
+- Scene/world context refreshes no longer require restarting the navigation session.
+- The route-loading state is not a blocking UI gate; cached routes are committed before live routing returns.
+- `scripts/verify-rust-structure.ps1` checks the module layout before dependency installation.

@@ -8,20 +8,23 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { throw 'npm is requir
 Write-Host "Node: $(node --version)"
 Write-Host "npm:  $(npm --version)"
 
+Write-Host '`n[0/5] Verifying Rust-first module structure...' -ForegroundColor Yellow
+& (Join-Path $PSScriptRoot 'verify-rust-structure.ps1')
+
 if (Get-Command tsc -ErrorAction SilentlyContinue) {
-  Write-Host '`n[0/4] Verifying dependency-independent navigation core...' -ForegroundColor Yellow
+  Write-Host '`n[1/5] Verifying dependency-independent navigation core...' -ForegroundColor Yellow
   & (Join-Path $PSScriptRoot 'verify-navigation-core.ps1')
 }
 
 Push-Location frontend
 try {
-  Write-Host '`n[1/4] Installing frontend dependencies...' -ForegroundColor Yellow
+  Write-Host '`n[2/5] Installing frontend dependencies...' -ForegroundColor Yellow
   npm install --no-audit --no-fund
 
-  Write-Host '`n[2/4] Running frontend unit tests...' -ForegroundColor Yellow
+  Write-Host '`n[3/5] Running frontend unit tests...' -ForegroundColor Yellow
   npm test
 
-  Write-Host '`n[3/4] Building frontend...' -ForegroundColor Yellow
+  Write-Host '`n[4/5] Building frontend...' -ForegroundColor Yellow
   npm run build
 } finally {
   Pop-Location
@@ -33,7 +36,7 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 }
 
 try { docker info | Out-Null } catch { Write-Warning 'Docker is installed but the Docker daemon is not running. Skipping Docker smoke test.'; exit 0 }
-Write-Host '`n[4/4] Building and starting the full Docker stack...' -ForegroundColor Yellow
+Write-Host '`n[5/5] Building and starting the full Docker stack...' -ForegroundColor Yellow
 docker compose config | Out-Null
 try {
   docker compose up --build -d

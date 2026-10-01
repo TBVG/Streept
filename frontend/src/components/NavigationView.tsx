@@ -6,11 +6,13 @@ import { getRoute, getParking, getParkedCars, getReports, getBillboards, checkin
 import { Location, Route3DHighlight, ParkingLot, ParkedCar, Report, Billboard, Maneuver, WsEvent, GeocodeResult, SceneContext } from '../types';
 import { haversineDistanceMeters, projectOntoPolyline, bearingDegrees, signedLateralOffset } from '../utils/geo';
 import { Theme } from '../hooks/useTheme';
-import { rankRoutesWithRisk, routeRiskSummary } from '../navigation/routeQuality';
-import { buildRouteDecisionProfiles, rankRoutesBySpatialIntelligence, RouteDecisionProfile } from '../navigation/routeDecisionIntelligence';
+import { routeRiskSummary } from '../navigation/routeQuality';
+import { RouteDecisionProfile, deriveRouteWayIds } from '../navigation/routeDecisionIntelligence';
 import { buildRouteIntelligenceGraph } from '../navigation/routeIntelligenceGraph';
 import { presentNavigationIntelligence } from '../navigation/intelligencePresentation';
 import { getRoadIntelligenceBatch } from '../navigation/spatialIntelligenceApi';
+import { analyzeNavigationRoutes } from '../navigation/rust/navigationEngineApi';
+import { RustNavigationSession } from '../navigation/rust/navigationSession';
 import { buildNavigationRouteIndex, deriveNavigationHealth, estimateNavigationEta, getNavigationProgress, smoothLocation } from '../navigation/navigationCore';
 import { estimateDeadReckonedLocation, isGpsContinuityGap, continuityAccuracyMeters } from '../navigation/navigationContinuity';
 import { speakNavigationPrompt } from '../navigation/voiceGuidance';
@@ -208,6 +210,9 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
   }
   const [navigationState, setNavigationState] = useState(() => navigationEngineRef.current!.snapshot().state);
   const [navigationEngineSnapshot, setNavigationEngineSnapshot] = useState(() => navigationEngineRef.current!.snapshot());
+  const rustDecisionAtRef = useRef(0);
+  const rustDecisionRequestRef = useRef(0);
+  const rustDecisionSignatureRef = useRef('');
   useEffect(() => {
     const engine = navigationEngineRef.current;
     if (!engine) return;
@@ -227,7 +232,6 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
   // dropping an active navigation session back into trip-preview mode.
   const navigationSessionRef = useRef(false);
   const routeRequestIdRef = useRef(0);
-  const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
   const [nearbyLoading, setNearbyLoading] = useState(false);
   const [nearbyError, setNearbyError] = useState<string | null>(null);
@@ -240,11 +244,85 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
   const [laneExecution, setLaneExecution] = useState<LaneChangeExecutionState | null>(null);
   const [sceneContext, setSceneContext] = useState<SceneContext | null>(null);
   const [gpsLastUpdateMs, setGpsLastUpdateMs] = useState<number | null>(null);
+
+  useEffect(() => {
+    // Rust owns the driver-facing decision policy. The session is initialized
+    // once per route and then receives only live observations, keeping the hot
+    // path small and avoiding repeated route/scene serialization.
+    const session = rustNavigationSessionRef.current!;
+    if (!navigationStarted || !navigationEngineSnapshot.route) {
+      session.stop();
+      return;
+    }
+    let cancelled = false;
+    void session.start(navigationEngineSnapshot.route, sceneContext).catch(() => {
+      // The local runtime remains responsive if the backend is unavailable.
+    });
+    return () => {
+      cancelled = true;
+      if (cancelled) session.stop();
+    };
+  }, [navigationStarted, navigationEngineSnapshot.route?.distance_meters, navigationEngineSnapshot.route?.duration_seconds]);
+
+  useEffect(() => {
+    if (!navigationStarted || !navigationEngineSnapshot.route) return;
+    void rustNavigationSessionRef.current!.updateContext(navigationEngineSnapshot.route, sceneContext).catch(() => {
+      // Context refresh is optional enrichment and must never block navigation.
+    });
+  }, [navigationStarted, navigationEngineSnapshot.route?.distance_meters, navigationEngineSnapshot.route?.duration_seconds, sceneContext]);
+
+  useEffect(() => {
+    if (!navigationStarted || !navigationEngineSnapshot.route) return;
+    const now = Date.now();
+    if (now - rustDecisionAtRef.current < 1000) return;
+    rustDecisionAtRef.current = now;
+    const requestId = ++rustDecisionRequestRef.current;
+    const snapshot = navigationEngineSnapshot;
+    void rustNavigationSessionRef.current!.step({
+      location: snapshot.matched?.location ?? snapshot.route?.segments?.[0]?.coords?.[0] ?? null,
+      currentWayId: snapshot.currentWayId,
+      currentLaneIndex: snapshot.currentLane?.laneIndex ?? null,
+      reports: [...reports, ...liveTraffic].map((report) => ({ location: report.location, type: report.type, confidence: report.confidence })),
+      trafficVehicles: liveTrafficVehicles.map((vehicle) => ({ location: vehicle.location })),
+      speedMps: snapshot.speedMps,
+      routeReacquire: snapshot.routeReacquire,
+      restrictionProhibited: snapshot.restrictionStatus.prohibited,
+      restrictionConfidence: snapshot.restrictionStatus.confidence,
+    }).then((rustDecision) => {
+      if (!rustDecision || requestId !== rustDecisionRequestRef.current) return;
+      const signature = `${rustDecision.spatial_guidance.action}|${rustDecision.spatial_guidance.reason}|${rustDecision.driver_decision.action}|${rustDecision.driver_decision.reason}|${rustDecision.driver_decision.target_lane_index ?? ''}`;
+      if (signature === rustDecisionSignatureRef.current) return;
+      rustDecisionSignatureRef.current = signature;
+      setNavigationEngineSnapshot((current) => ({
+        ...current,
+        spatialGuidance: {
+          action: rustDecision.spatial_guidance.action,
+          confidence: rustDecision.spatial_guidance.confidence,
+          priority: rustDecision.spatial_guidance.priority,
+          reason: rustDecision.spatial_guidance.reason,
+          targetSpeedMps: rustDecision.spatial_guidance.target_speed_mps,
+        },
+        driverDecision: {
+          action: rustDecision.driver_decision.action,
+          priority: rustDecision.driver_decision.priority,
+          confidence: rustDecision.driver_decision.confidence,
+          reason: rustDecision.driver_decision.reason,
+          targetSpeedMps: rustDecision.driver_decision.target_speed_mps,
+          laneChangeDirection: rustDecision.driver_decision.lane_change_direction,
+          targetLaneIndex: rustDecision.driver_decision.target_lane_index,
+        },
+      }));
+    }).catch(() => {
+      // Rust enrichment is non-blocking; the UI keeps the last valid state.
+    });
+  }, [navigationEngineSnapshot, navigationStarted, reports, liveTraffic, liveTrafficVehicles]);
   const [voiceEnabled, setVoiceEnabled] = useState<boolean>(() => { try { return localStorage.getItem('streept_voice_enabled') !== '0'; } catch { return true; } });
   const [hazardRefreshAt, setHazardRefreshAt] = useState(0);
   const [interactionToast, setInteractionToast] = useState<string | null>(null);
   const interactionToastTimerRef = useRef<number | null>(null);
   const liveTrafficStreamRef = useRef<LiveTrafficStream | null>(null);
+  const rustNavigationSessionRef = useRef<RustNavigationSession | null>(null);
+  if (!rustNavigationSessionRef.current) rustNavigationSessionRef.current = new RustNavigationSession();
   if (!liveTrafficStreamRef.current) liveTrafficStreamRef.current = new LiveTrafficStream();
 
   // Live road intelligence refreshes during active navigation. The endpoint is
@@ -1226,7 +1304,6 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
     setRouteDecisionProfiles([]);
     setRouteCommunityIntelligence(new Map());
     setRouteError(null);
-    setRouteLoading(false);
     dispatchNavigation({ type: 'PLAN' });
     setSplitView(false);
     setActiveManeuver(null);
@@ -1474,116 +1551,119 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
   const loadRoute = async (from: Location, to: Location, preserveNavigation = false) => {
     const requestId = ++routeRequestIdRef.current;
     const keepSession = preserveNavigation || navigationSessionRef.current;
-    setRouteLoading(true);
+    let hasUsableRoute = false;
     setRouteError(null);
     if (!keepSession) {
       navigationSessionRef.current = false;
       dispatchNavigation({ type: 'PLAN' });
     }
 
-    try {
-      let routes: Route3DHighlight[] = [];
-      try {
-        routes = await getRoute(from, to);
-      } catch (networkError) {
-        const cached = await readOfflineTrip(from, to, 7 * 24 * 60 * 60 * 1000);
-        if (cached?.routes?.length) {
-          routes = cached.routes;
-          setInteractionToast('Using your cached route — live routing is unavailable.');
-        } else {
-          throw networkError;
-        }
-      }
-
-      // Ignore an older response that arrived after a newer route request.
-      if (requestId !== routeRequestIdRef.current) return;
-      if (!routes || routes.length === 0) {
-        if (keepSession) dispatchNavigation({ type: 'REROUTE_FAILED' });
-        setRouteOptions([]);
-        setRouteDecisionProfiles([]);
-        setRouteError('No drivable route was found between these locations.');
-        return;
-      }
-
-      // Commit the real routing result to the UI immediately. Community
-      // intelligence, offline persistence, and map-tile caching are useful
-      // enrichments, but none of them should keep the core route in a
-      // "Building route…" state. This is especially important on slower
-      // devices and makes the Start button reflect the actual routing result
-      // rather than the completion of unrelated background work.
-      const fallbackRankedRoutes = rankRoutesWithRisk(routes, [...reports, ...liveTraffic]);
-      const fallbackProfiles = fallbackRankedRoutes.map((candidate) =>
-        buildRouteDecisionProfiles([candidate], [...reports, ...liveTraffic], sceneContext, new Map())[0]
-      );
-
-      setRouteOptions(fallbackRankedRoutes);
-      setRouteDecisionProfiles(fallbackProfiles);
+    const commitRoutes = (routes: Route3DHighlight[], source: 'cache' | 'network') => {
+      if (requestId !== routeRequestIdRef.current || !routes?.length) return false;
+      hasUsableRoute = true;
+      setRouteOptions(routes);
+      setRouteDecisionProfiles([]);
       setSelectedRouteIndex(0);
       setManeuverIndex(0);
       setActiveManeuver(null);
-
-      // The route is ready for the user now. Do not wait for optional
-      // intelligence calls before enabling "Enter navigation".
-      setRouteLoading(false);
-
-      void writeOfflineTrip(from, to, fallbackRankedRoutes, {});
-      void cacheRouteMapTiles(fallbackRankedRoutes[0]?.segments.flatMap((segment) =>
+        if (source === 'cache') setInteractionToast('Route ready instantly from your local cache.');
+      void writeOfflineTrip(from, to, routes, {});
+      void cacheRouteMapTiles(routes[0]?.segments.flatMap((segment) =>
         segment.coords.map((coord) => ({ lat: coord.lat, lng: coord.lng }))
       ) ?? []);
-
       if (keepSession) {
         navigationSessionRef.current = true;
-        // A successful reroute resumes the existing session; it must not be
-        // treated as a fresh START event because the state machine correctly
-        // rejects START while already in the rerouting state.
         dispatchNavigation(navigationState.phase === 'rerouting'
           ? { type: 'REROUTE_SUCCEEDED' }
           : { type: 'START', hasRoute: true });
       }
+      return true;
+    };
 
-      // Enrich the already-visible route in the background. If the driver has
-      // started navigation before this finishes, leave the active route alone
-      // rather than swapping route geometry underneath the driver.
+    // INSTANT-FIRST: use a recent local route before touching the network.
+    // The cached route is immediately usable while a fresh route is requested
+    // in the background. This removes network latency from the critical UI path.
+    try {
+      const cached = await readOfflineTrip(from, to, 7 * 24 * 60 * 60 * 1000);
+      if (cached?.routes?.length && requestId === routeRequestIdRef.current) {
+        commitRoutes(cached.routes, 'cache');
+      }
+    } catch {
+      // Cache access is an optimization, never a navigation failure.
+    }
+
+    try {
+      const routes = await getRoute(from, to);
+      if (requestId !== routeRequestIdRef.current) return;
+      if (!routes?.length) {
+        if (!hasUsableRoute) {
+          if (keepSession) dispatchNavigation({ type: 'REROUTE_FAILED' });
+          setRouteOptions([]);
+          setRouteDecisionProfiles([]);
+          setRouteError('No drivable route was found between these locations.');
+        }
+        return;
+      }
+
+      // Commit network routing immediately. Rust intelligence is deliberately
+      // off the critical path: the route must never wait for scoring, traffic,
+      // community intelligence, or other enrichment.
+      commitRoutes(routes, 'network');
+
+      // Rust is the sole route-ranking implementation. We intentionally do not
+      // fall back to the old TypeScript scorer because duplicate navigation
+      // brains increase CPU work and can disagree about the selected route.
       void (async () => {
         try {
-          const wayIds = Array.from(new Set(routes.flatMap((candidate) =>
-            buildRouteDecisionProfiles([candidate], [], sceneContext, new Map())[0].wayIds
-          ))).slice(0, 128);
-          if (!wayIds.length) return;
+          const wayIdsByRoute = routes.map((candidate) => deriveRouteWayIds(candidate, sceneContext));
+          const rustAnalysis = await analyzeNavigationRoutes(routes, [...reports, ...liveTraffic], wayIdsByRoute);
+          if (requestId !== routeRequestIdRef.current || navigationSessionRef.current) return;
+          setRouteOptions(rustAnalysis.routes);
+          setRouteDecisionProfiles(rustAnalysis.profiles.map((profile) => ({
+            routeIndex: profile.route_index,
+            baseScore: profile.base_score,
+            learnedDifficulty: profile.learned_difficulty,
+            learnedConfidence: profile.learned_confidence,
+            difficultRoads: profile.difficult_roads,
+            highAttentionRoads: profile.high_attention_roads,
+            maneuverComplexity: profile.maneuver_complexity,
+            recommendationScore: profile.recommendation_score,
+            reason: profile.reason,
+            wayIds: profile.way_ids,
+          })));
+          setSelectedRouteIndex(0);
+        } catch (rustError) {
+          // The route remains usable. Rust is authoritative for intelligence,
+          // but an unavailable intelligence service must not block navigation.
+          console.warn('Rust route intelligence unavailable; keeping base route:', rustError);
+        }
+      })();
 
+      // Community intelligence and map tiles are also background work.
+      void (async () => {
+        try {
+          const wayIdsByRoute = routes.map((candidate) => deriveRouteWayIds(candidate, sceneContext));
+          const wayIds = Array.from(new Set(wayIdsByRoute.flat())).slice(0, 128);
+          if (!wayIds.length) return;
           const communityItems = await getRoadIntelligenceBatch(wayIds, 30);
           if (requestId !== routeRequestIdRef.current || navigationSessionRef.current) return;
-
-          const community = new Map(communityItems.map((item) => [item.way_id, item]));
-          setRouteCommunityIntelligence(community);
-          const profiles = buildRouteDecisionProfiles(routes, [...reports, ...liveTraffic], sceneContext, community);
-          const order = rankRoutesBySpatialIntelligence(profiles);
-          const enrichedRoutes = order.map((index) => routes[index]);
-          const enrichedProfiles = order.map((index) => profiles[index]);
-
-          if (requestId !== routeRequestIdRef.current || navigationSessionRef.current) return;
-          setRouteOptions(enrichedRoutes);
-          setRouteDecisionProfiles(enrichedProfiles);
-          setSelectedRouteIndex(0);
+          setRouteCommunityIntelligence(new Map(communityItems.map((item) => [item.way_id, item])));
         } catch {
-          // Community intelligence is optional. The already-committed route
-          // remains fully usable when this enrichment is unavailable.
-          setRouteCommunityIntelligence(new Map());
+          // Optional enrichment; never block or invalidate the route.
         }
       })();
     } catch (error) {
       if (requestId !== routeRequestIdRef.current) return;
-      console.error('Error loading route:', error);
-      if (!keepSession) {
-        setRouteOptions([]);
-        setRouteDecisionProfiles([]);
-        setRouteCommunityIntelligence(new Map());
+      // A cached route may already be visible and usable. Network failure must
+      // not replace it with an error/loading state.
+      if (!hasUsableRoute) {
+        console.error('Error loading route:', error);
+        if (keepSession) dispatchNavigation({ type: 'REROUTE_FAILED' });
+        setRouteError(error instanceof Error ? error.message : 'We could not build this route. Check the locations and try again.');
       } else {
-        dispatchNavigation({ type: 'REROUTE_FAILED' });
+        setInteractionToast('Using your local route while live routing is unavailable.');
       }
-      setRouteError(error instanceof Error ? error.message : 'We could not build this route. Check the locations and try again.');
     } finally {
-      if (requestId === routeRequestIdRef.current) setRouteLoading(false);
     }
   };
 
@@ -2009,7 +2089,7 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
               <button type="button" className="destination-command-close" onClick={() => { setDestination(null); setRouteOptions([]); setRouteError(null); setSelectedParkingLotId(null); }}>×</button>
             </div>
 
-            {route && !routeLoading && !routeError && (
+            {route && !routeError && (
               <div className="destination-route-summary">
                 <div className="destination-route-primary">
                   <strong>{route.duration_seconds != null ? Math.max(1, Math.round(route.duration_seconds / 60)) : '—'}</strong>
@@ -2109,11 +2189,11 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
             <div className="start-navigation-route-head">
               <div>
                 <span className="start-navigation-eyebrow">TRIP PREVIEW</span>
-                <strong>{routeLoading ? 'Building your route…' : routeError ? 'Route unavailable' : 'Ready to go'}</strong>
+                <strong>{routeError ? 'Route unavailable' : 'Ready to go'}</strong>
               </div>
               <span className="start-navigation-destination">{searchQuery || 'Destination selected'}</span>
             </div>
-            {route && !routeLoading && !routeError ? (
+            {route && !routeError ? (
               <div className="start-navigation-metrics">
                 <div><strong>{route.duration_seconds != null ? Math.max(1, Math.round(route.duration_seconds / 60)) : '--'}</strong><span>min</span></div>
                 <div><strong>{route.distance_meters != null ? (route.distance_meters / 1609.344).toFixed(1) : '--'}</strong><span>mi</span></div>
@@ -2122,7 +2202,7 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
             ) : (
               <div className={`start-navigation-status ${routeError ? 'is-error' : ''}`}>
                 <span>{routeError ?? 'Finding the best drivable route…'}</span>
-                {routeError && !routeLoading && (customStart || userLocation) && destination && (
+                {routeError && (customStart || userLocation) && destination && (
                   <button
                     type="button"
                     className="route-retry-button"
@@ -2144,15 +2224,9 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
                 disabled={!route || !!routeError}
               >
                 <span className="start-navigation-button-icon">➤</span>
-                <span>{routeLoading && !route ? 'Building route…' : 'Enter navigation'}</span>
+                <span>Enter navigation</span>
               </button>
             </div>
-          </div>
-        )}
-        {navigationStarted && routeLoading && (
-          <div className="navigation-recalculating" role="status">
-            <span className="navigation-recalculating-dot" />
-            Recalculating your route…
           </div>
         )}
         {navigationPhase === 'arrived' && destination && (
@@ -2194,12 +2268,7 @@ const NavigationView: React.FC<NavigationViewProps> = ({ currentUserId, theme, o
             </div>
           </div>
         )}
-        {routeLoading && (
-          <div className="route-loading-pill" role="status" aria-live="polite">
-            <span className="loading-spinner" />
-            <span>{navigationPhase === 'rerouting' ? 'Finding a better route…' : 'Building your route…'}</span>
-          </div>
-        )}
+        {/* Instant-first: routing never covers the map with a blocking loading layer. */}
         <MapContainer
           ref={mapRef}
           center={userLocation ? [userLocation.lat, userLocation.lng] : [37.7749, -122.4194]}
